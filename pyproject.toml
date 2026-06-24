@@ -19,6 +19,8 @@ dependencies = [
     "supabase>=2.16.0",
     "email-validator>=2.2.0",
     "bcrypt>=4.2.0",
+    "google-cloud-tasks>=2.16.0",
+    "google-auth>=2.36.0",
 ]
 
 [project.optional-dependencies]

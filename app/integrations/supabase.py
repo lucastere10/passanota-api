@@ -88,6 +88,14 @@ async def create_signed_storage_url(
     return await asyncio.to_thread(_sign)
 
 
+async def download_storage_object(bucket: str, path: str) -> bytes:
+    def _download() -> bytes:
+        client = get_supabase_admin()
+        return client.storage.from_(bucket).download(path)
+
+    return await asyncio.to_thread(_download)
+
+
 def _extract_link_properties(response: object) -> dict:
     properties = getattr(response, "properties", None)
     if properties is None and isinstance(response, dict):

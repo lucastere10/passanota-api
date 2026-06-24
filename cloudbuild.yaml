@@ -1,0 +1,131 @@
+substitutions:
+  _REGION: us-central1
+  _AR_REPOSITORY: passanota-images
+  _IMAGE_NAME: passanota-api
+  _SERVICE_NAME: passanota-api
+  _TAG: latest
+  _FRONTEND_URL: ""
+  _SUPABASE_URL: ""
+  _LLM_PROVIDER: openai
+  _LLM_MODEL: gpt-4o
+  _EMAIL_FROM: noreply@passanota.com
+  _PLATFORM_ADMIN_EMAIL: ""
+  _PLATFORM_ADMIN_NOTIFY_EMAIL: ""
+  _CLOUD_TASKS_ENABLED: "true"
+  _GCP_LOCATION: us-central1
+  _CLOUD_TASKS_INVOICE_QUEUE: invoice-processing
+  _CLOUD_TASKS_EMAIL_QUEUE: email-delivery
+  _TASK_HANDLER_BASE_URL: ""
+  _CLOUD_TASKS_SERVICE_ACCOUNT: ""
+  _MIN_INSTANCES: "0"
+  _SECRET_DATABASE_URL: PASSANOTA_DATABASE_URL
+  _SECRET_SUPABASE_KEY: PASSANOTA_SUPABASE_SECRET_KEY
+  _SECRET_LLM_API_KEY: PASSANOTA_OPENAI_API_KEY
+  _SECRET_RESEND_API_KEY: RESEND_API_KEY
+
+steps:
+  - id: validate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ -z "${_FRONTEND_URL}" ] || [ -z "${_SUPABASE_URL}" ] || [ -z "${_TASK_HANDLER_BASE_URL}" ] || [ -z "${_CLOUD_TASKS_SERVICE_ACCOUNT}" ]; then
+          echo "ERROR: Configure _FRONTEND_URL, _SUPABASE_URL, _TASK_HANDLER_BASE_URL e _CLOUD_TASKS_SERVICE_ACCOUNT."
+          exit 1
+        fi
+        case "${_FRONTEND_URL}" in *XXXX*|*"[project-ref]"*) echo "ERROR: _FRONTEND_URL é placeholder."; exit 1;; esac
+        for secret in "${_SECRET_DATABASE_URL}" "${_SECRET_SUPABASE_KEY}" "${_SECRET_LLM_API_KEY}" "${_SECRET_RESEND_API_KEY}"; do
+          echo "Checking secret: $$secret"
+          gcloud secrets describe "$$secret" --project="$PROJECT_ID" >/dev/null
+        done
+        echo "Validation OK (commit: $COMMIT_SHA)"
+
+  - id: lint
+    name: python:3.13-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        pip install --no-cache-dir uv
+        uv pip install --system ".[dev]"
+        ruff check app tests
+    waitFor: [validate]
+
+  - id: test
+    name: python:3.13-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        pip install --no-cache-dir uv
+        uv pip install --system ".[dev]"
+        pytest tests/ -q --ignore=tests/test_supabase_integration.py
+    waitFor: [lint]
+
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:latest
+      - -f
+      - Dockerfile
+      - .
+    waitFor: [test]
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}
+    waitFor: [build]
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --no-allow-unauthenticated
+      - --port
+      - "8080"
+      - --memory
+      - 2Gi
+      - --cpu
+      - "2"
+      - --timeout
+      - "300"
+      - --concurrency
+      - "20"
+      - --min-instances
+      - ${_MIN_INSTANCES}
+      - --max-instances
+      - "10"
+      - --startup-probe
+      - httpGet.path=/health/live,httpGet.port=8080,initialDelaySeconds=5,timeoutSeconds=5,periodSeconds=5,failureThreshold=24
+      - --set-env-vars
+      - ^|^SUPABASE_URL=${_SUPABASE_URL}|FRONTEND_URL=${_FRONTEND_URL}|LLM_PROVIDER=${_LLM_PROVIDER}|LLM_MODEL=${_LLM_MODEL}|EMBEDDINGS_ENABLED=true|SUPABASE_STORAGE_BUCKET=invoice-photos|DEBUG=false|EMAIL_FROM=${_EMAIL_FROM}|PLATFORM_ADMIN_EMAIL=${_PLATFORM_ADMIN_EMAIL}|PLATFORM_ADMIN_NOTIFY_EMAIL=${_PLATFORM_ADMIN_NOTIFY_EMAIL}|PYTHONUNBUFFERED=1|CLOUD_TASKS_ENABLED=${_CLOUD_TASKS_ENABLED}|GCP_PROJECT=$PROJECT_ID|GCP_LOCATION=${_GCP_LOCATION}|CLOUD_TASKS_INVOICE_QUEUE=${_CLOUD_TASKS_INVOICE_QUEUE}|CLOUD_TASKS_EMAIL_QUEUE=${_CLOUD_TASKS_EMAIL_QUEUE}|TASK_HANDLER_BASE_URL=${_TASK_HANDLER_BASE_URL}|CLOUD_TASKS_SERVICE_ACCOUNT=${_CLOUD_TASKS_SERVICE_ACCOUNT}
+      - --set-secrets
+      - DATABASE_URL=${_SECRET_DATABASE_URL}:latest,SUPABASE_SECRET_KEY=${_SECRET_SUPABASE_KEY}:latest,LLM_PROVIDER_API_KEY=${_SECRET_LLM_API_KEY}:latest,RESEND_API_KEY=${_SECRET_RESEND_API_KEY}:latest
+    waitFor: [push]
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

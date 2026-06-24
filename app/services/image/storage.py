@@ -4,6 +4,7 @@ from app.config import get_settings
 from app.integrations.supabase import (
     SupabaseConfigError,
     create_signed_storage_url,
+    download_storage_object,
     upload_storage_object,
 )
 
@@ -44,6 +45,15 @@ class InvoicePhotoStorage:
             return None
         except Exception:
             return None
+
+    async def download(self, path: str) -> bytes:
+        self._require_config()
+        try:
+            return await download_storage_object(self._bucket, path)
+        except SupabaseConfigError as exc:
+            raise StorageError(str(exc)) from exc
+        except Exception as exc:
+            raise StorageError(f"Download failed: {exc}") from exc
 
 
 invoice_photo_storage = InvoicePhotoStorage()

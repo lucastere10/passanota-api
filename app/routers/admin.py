@@ -7,11 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db_session, require_platform_admin
-from app.integrations.resend import ResendError
 from app.models import Convite, ConviteRole, Empresa, PlatformAdmin
 from app.schemas.admin import AdminEmpresaCreate, AdminEmpresaListItem, AdminEmpresaResponse
 from app.schemas.invite import InviteResponse, OperadorInviteRequest
+from app.schemas.tasks import SendEmailTask
 from app.services.invite_service import invite_service
+from app.services.task_dispatcher import dispatch_email_task
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -65,17 +66,9 @@ async def create_empresa(
         invited_by_user_id=admin.user_id,
     )
 
-    try:
-        await invite_service.send_invite_email_for_convite(db, convite)
-    except (ResendError, ValueError) as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Falha ao enviar convite: {exc}",
-        ) from exc
-
     await db.commit()
     await db.refresh(empresa)
+    await dispatch_email_task(SendEmailTask(type="invite", convite_id=convite.id))
     return AdminEmpresaResponse(
         id=empresa.id,
         nome=empresa.nome,
@@ -104,17 +97,9 @@ async def resend_gestor_invite(
         invited_by_user_id=admin.user_id,
     )
 
-    try:
-        await invite_service.send_invite_email_for_convite(db, convite)
-    except (ResendError, ValueError) as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Falha ao enviar convite: {exc}",
-        ) from exc
-
     await db.commit()
     await db.refresh(convite)
+    await dispatch_email_task(SendEmailTask(type="invite", convite_id=convite.id))
     return InviteResponse(
         id=convite.id,
         email=convite.email,

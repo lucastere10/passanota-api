@@ -4,7 +4,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.integrations.supabase import generate_magic_link
 from app.models import Convite, Empresa, Funcionario, PlatformAdmin
 from app.schemas.auth_api import (
     AuthMeResponse,
@@ -12,8 +11,9 @@ from app.schemas.auth_api import (
     PendingInvite,
     UserProfile,
 )
-from app.services.email_service import send_interest_notification, send_magic_link_email
+from app.schemas.tasks import SendEmailTask
 from app.services.invite_service import invite_service
+from app.services.task_dispatcher import dispatch_email_task
 
 
 def _normalize_email(email: str) -> str:
@@ -48,14 +48,11 @@ class AuthService:
 
     async def send_magic_link(self, db: AsyncSession, email: str) -> None:
         normalized = _normalize_email(email)
-        settings = get_settings()
 
         if not await self.can_request_magic_link(db, normalized):
             return
 
-        redirect_to = f"{settings.frontend_url.rstrip('/')}/auth/confirm"
-        link = await generate_magic_link(normalized, redirect_to)
-        await send_magic_link_email(normalized, link)
+        await dispatch_email_task(SendEmailTask(type="magic_link", email=normalized))
 
     async def ensure_platform_admin_bootstrap(
         self, db: AsyncSession, user_id: uuid.UUID, email: str | None
@@ -149,7 +146,9 @@ class AuthService:
     async def submit_interest(
         self, email: str, nome: str | None, mensagem: str | None
     ) -> None:
-        await send_interest_notification(email, nome, mensagem)
+        await dispatch_email_task(
+            SendEmailTask(type="interest", email=email, nome=nome, mensagem=mensagem)
+        )
 
 
 auth_service = AuthService()

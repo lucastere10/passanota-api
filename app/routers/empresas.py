@@ -5,8 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_auth_context, get_current_user, get_db_session, require_gestor
-from app.integrations.resend import ResendError
+from app.dependencies import get_current_user, get_db_session, require_gestor
 from app.models import ConviteRole, Empresa, Funcionario
 from app.schemas.auth import AuthContext, AuthUser
 from app.schemas.auth_api import EmpresaMembership
@@ -17,8 +16,10 @@ from app.schemas.invite import (
     InviteResponse,
     OperadorInviteRequest,
 )
+from app.schemas.tasks import SendEmailTask
 from app.services.device_service import device_service
 from app.services.invite_service import invite_service
+from app.services.task_dispatcher import dispatch_email_task
 
 router = APIRouter(prefix="/empresas", tags=["empresas"])
 
@@ -63,17 +64,9 @@ async def invite_operador(
         invited_by_user_id=auth.user.id,
     )
 
-    try:
-        await invite_service.send_invite_email_for_convite(db, convite)
-    except (ResendError, ValueError) as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Falha ao enviar convite: {exc}",
-        ) from exc
-
     await db.commit()
     await db.refresh(convite)
+    await dispatch_email_task(SendEmailTask(type="invite", convite_id=convite.id))
     return InviteResponse(
         id=convite.id,
         email=convite.email,

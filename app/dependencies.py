@@ -7,47 +7,36 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.database import get_db
 from app.integrations.supabase import SupabaseAuthError, SupabaseConfigError, verify_access_token
-from app.models import Dispositivo, Empresa, Funcionario, FuncionarioRole, PlatformAdmin
+from app.models import Empresa, Funcionario, FuncionarioRole, PlatformAdmin
 from app.schemas.auth import AuthContext, AuthUser, CaptureContext, DeviceContext
 
 from app.services.device_service import device_service
 
-settings = get_settings()
 
-
-async def verify_api_key(
-    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-) -> None:
-    if not settings.api_key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key not configured on server",
-        )
-    if not x_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing API key",
-        )
-    if x_api_key != settings.api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-        )
+def resolve_supabase_authorization(
+    authorization: str | None,
+    x_supabase_authorization: str | None = None,
+) -> str | None:
+    """Supabase JWT: custom header when Cloud Run IAM uses Authorization."""
+    if x_supabase_authorization:
+        return x_supabase_authorization
+    return authorization
 
 
 async def get_current_user(
     authorization: str | None = Header(default=None),
+    x_supabase_authorization: str | None = Header(default=None, alias="X-Supabase-Authorization"),
 ) -> AuthUser:
-    if not authorization or not authorization.startswith("Bearer "):
+    auth_header = resolve_supabase_authorization(authorization, x_supabase_authorization)
+    if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing bearer token",
         )
 
-    token = authorization.removeprefix("Bearer ").strip()
+    token = auth_header.removeprefix("Bearer ").strip()
     try:
         user_data = await verify_access_token(token)
     except SupabaseConfigError as exc:
@@ -178,6 +167,7 @@ async def get_device_context(
 
 async def get_capture_context(
     authorization: str | None = Header(default=None),
+    x_supabase_authorization: str | None = Header(default=None, alias="X-Supabase-Authorization"),
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
     x_empresa_id: str | None = Header(default=None, alias="X-Empresa-Id"),
     db: AsyncSession = Depends(get_db),
@@ -192,13 +182,14 @@ async def get_capture_context(
         device, empresa = row
         return CaptureContext(empresa_id=empresa.id, device_id=device.id)
 
-    if not authorization or not authorization.startswith("Bearer "):
+    auth_header = resolve_supabase_authorization(authorization, x_supabase_authorization)
+    if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication",
         )
 
-    user = await get_current_user(authorization)
+    user = await get_current_user(authorization, x_supabase_authorization)
     auth = await get_auth_context(user, db, x_empresa_id)
     if auth.role not in (FuncionarioRole.GESTOR, FuncionarioRole.OPERADOR):
         raise HTTPException(

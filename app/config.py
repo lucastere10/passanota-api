@@ -21,11 +21,6 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://postgres:postgres@db.[project-ref].supabase.co:5432/postgres"
     )
-    api_key: str = Field(
-        default="",
-        description="Chave de acesso à API do projeto (header X-API-Key)",
-    )
-    api_key_header: str = "X-API-Key"
     supabase_url: str = ""
     supabase_secret_key: str = Field(
         default="",
@@ -62,6 +57,13 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     platform_admin_notify_email: str = ""
     platform_admin_email: str = ""
+    cloud_tasks_enabled: bool = False
+    gcp_project: str = ""
+    gcp_location: str = "us-central1"
+    cloud_tasks_invoice_queue: str = "invoice-processing"
+    cloud_tasks_email_queue: str = "email-delivery"
+    task_handler_base_url: str = ""
+    cloud_tasks_service_account: str = ""
 
     @field_validator("database_url", mode="before")
     @classmethod

@@ -100,6 +100,7 @@ class Convite(Base):
     invited_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -252,6 +253,9 @@ class Invoice(Base):
     ai_raw_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     ai_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[InvoiceStatus] = mapped_column(
         Enum(
             InvoiceStatus,

@@ -12,9 +12,8 @@ API de controle de custos via leitura de notas fiscais com IA, PostgreSQL (Supab
 
 | Variável | Uso |
 |----------|-----|
-| `API_KEY` | Chave da **API do projeto** (header `X-API-Key`). O frontend usa o mesmo valor em `PASSANOTA_API_KEY` |
 | `LLM_PROVIDER` | Provedor de visão: `openai`, `gemini` ou `anthropic` |
-| `LLM_PROVIDER_API_KEY` | Chave do provedor de IA (OpenAI, Google, Anthropic) — **separada** da `API_KEY` |
+| `LLM_PROVIDER_API_KEY` | Chave do provedor de IA (OpenAI, Google, Anthropic) |
 | `DATABASE_URL` | Connection string do Supabase Postgres |
 | `SUPABASE_URL` / `SUPABASE_SECRET_KEY` | Storage e validação de tokens |
 
@@ -93,7 +92,11 @@ Foto → OpenCV → LLM (1x) → SQL (normalização + categoria) → banco
 | GET | `/v1/dashboard/*` | Análises |
 | POST | `/v1/search/semantic` | Busca semântica |
 
-Rotas `/v1/*` exigem header `X-API-Key` com o valor de `API_KEY`.
+Rotas `/v1/*` exigem autenticação Supabase (`Authorization: Bearer`) ou token de dispositivo (`X-Device-Token`).
+
+## Deploy (Cloud Run)
+
+Ver [docs/DEPLOY-GCP.md](docs/DEPLOY-GCP.md).
 
 ## Testes
 

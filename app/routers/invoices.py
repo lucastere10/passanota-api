@@ -16,7 +16,6 @@ from app.schemas.invoice import (
     invoice_to_response,
 )
 from app.services.device_service import device_service
-from app.services.image.storage import invoice_photo_storage
 from app.services.invoice_service import invoice_service
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -24,7 +23,7 @@ router = APIRouter(prefix="/invoices", tags=["invoices"])
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
-@router.post("/capture", response_model=CaptureInvoiceResponse)
+@router.post("/capture", response_model=CaptureInvoiceResponse, status_code=status.HTTP_202_ACCEPTED)
 async def capture_invoice(
     capture_ctx: Annotated[CaptureContext, Depends(get_capture_context)],
     file: UploadFile = File(...),
@@ -45,7 +44,7 @@ async def capture_invoice(
         )
 
     try:
-        invoice, extraction, preprocess_skipped = await invoice_service.capture_invoice(
+        invoice = await invoice_service.submit_capture(
             db,
             image_bytes,
             empresa_id=capture_ctx.empresa_id,
@@ -59,24 +58,13 @@ async def capture_invoice(
         device = await db.get(Dispositivo, capture_ctx.device_id)
         if device:
             await device_service.touch_last_used(db, device)
-
-    processed_url = None
-    if invoice.photo_processed_path:
-        processed_url = await invoice_photo_storage.create_signed_url(invoice.photo_processed_path)
-
-    summary = ExtractionSummary()
-    if extraction:
-        summary = ExtractionSummary(
-            fornecedor=extraction.invoice.fornecedor,
-            data=extraction.invoice.data,
-            item_count=len(extraction.invoice.itens),
-        )
+            await db.commit()
 
     return CaptureInvoiceResponse(
         invoice=invoice_to_response(invoice),
-        processed_image_url=processed_url,
-        preprocess_skipped=preprocess_skipped,
-        extraction_summary=summary,
+        processed_image_url=None,
+        preprocess_skipped=False,
+        extraction_summary=ExtractionSummary(),
     )
 
 

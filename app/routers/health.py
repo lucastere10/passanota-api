@@ -7,6 +7,12 @@ from app.database import get_db
 router = APIRouter(tags=["health"])
 
 
+@router.get("/health/live")
+async def liveness_check() -> dict[str, str]:
+    """Probe leve para startup/liveness — não depende de DB nem de modelos ML."""
+    return {"status": "ok"}
+
+
 @router.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db)) -> dict[str, str]:
     db_status = "ok"

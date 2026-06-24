@@ -1,11 +1,8 @@
-from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
-from uuid import uuid4
 
 import pytest
 
-from app.schemas.extraction import ExtractedInvoice, ExtractedItem, VisionExtractionResult
+from app.schemas.extraction import ExtractedInvoice, ExtractedItem
 from app.services.invoice_service import InvoiceService
 
 

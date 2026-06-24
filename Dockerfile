@@ -1,4 +1,7 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS builder
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
@@ -8,11 +11,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock README.md ./
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
 
-RUN pip install --no-cache-dir .
+RUN uv pip install --system --no-cache --prefix=/install .
 
-EXPOSE 8000
+FROM python:3.13-slim AS runner
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8080 \
+    PATH="/install/bin:${PATH}" \
+    PYTHONPATH="/install/lib/python3.13/site-packages"
+
+WORKDIR /app
+
+COPY --from=builder /install /install
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
+
+RUN useradd --create-home --uid 1001 appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8080
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

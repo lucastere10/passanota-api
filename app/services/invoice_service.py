@@ -1,18 +1,15 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models import Emitter, Invoice, InvoiceItem, InvoiceSource, InvoiceStatus
-from app.schemas.extraction import ExtractedInvoice, VisionExtractionResult
-from app.services.embedding_service import embedding_service
-from app.services.image.preprocessor import preprocess_image
+from app.schemas.extraction import ExtractedInvoice
 from app.services.image.storage import StorageError, invoice_photo_storage
-from app.services.vision import VisionExtractorError, get_vision_extractor
+from app.services.task_dispatcher import dispatch_invoice_processing
 
 settings = get_settings()
 
@@ -79,20 +76,19 @@ class InvoiceService:
         )
         return list(result.scalars().all()), total
 
-    async def capture_invoice(
+    async def submit_capture(
         self,
         db: AsyncSession,
         image_bytes: bytes,
         empresa_id: uuid.UUID | None = None,
         device_id: uuid.UUID | None = None,
         content_type: str = "image/jpeg",
-    ) -> tuple[Invoice, VisionExtractionResult | None, bool]:
+    ) -> Invoice:
         if len(image_bytes) > settings.llm_max_image_bytes:
             raise ValueError(
                 f"Image exceeds maximum size of {settings.llm_max_image_bytes} bytes"
             )
 
-        preprocess_result = preprocess_image(image_bytes)
         invoice = Invoice(
             empresa_id=empresa_id,
             device_id=device_id,
@@ -102,48 +98,26 @@ class InvoiceService:
         db.add(invoice)
         await db.flush()
 
-        original_path, processed_path = invoice_photo_storage.build_paths(invoice.id, empresa_id)
+        original_path, _processed_path = invoice_photo_storage.build_paths(invoice.id, empresa_id)
         try:
-            await invoice_photo_storage.upload(original_path, preprocess_result.original_bytes, content_type)
-            await invoice_photo_storage.upload(
-                processed_path, preprocess_result.processed_bytes, preprocess_result.content_type
-            )
+            await invoice_photo_storage.upload(original_path, image_bytes, content_type)
             invoice.photo_original_path = original_path
-            invoice.photo_processed_path = processed_path
-        except StorageError:
-            pass
-
-        extraction_result: VisionExtractionResult | None = None
-        try:
-            extractor = get_vision_extractor()
-            extraction_result = await extractor.extract(
-                preprocess_result.processed_bytes,
-                preprocess_result.content_type,
-            )
-            invoice.ai_raw_response = extraction_result.raw_response
-            invoice.ai_model = extraction_result.model
-            invoice.extracted_at = datetime.now(timezone.utc)
-            await self._populate_from_extraction(db, invoice, extraction_result.invoice)
-            await db.execute(
-                text("SELECT normalize_invoice_items(:invoice_id)"),
-                {"invoice_id": invoice.id},
-            )
-            invoice.status = InvoiceStatus.PARSED
-        except (VisionExtractorError, ValueError) as exc:
-            invoice.status = InvoiceStatus.FAILED
-            invoice.error_message = str(exc)
+        except StorageError as exc:
+            raise ValueError(f"Failed to store image: {exc}") from exc
 
         await db.commit()
         await db.refresh(invoice)
-        result = await self.get_by_id(db, invoice.id)
-        return result or invoice, extraction_result, preprocess_result.preprocess_skipped
+        await dispatch_invoice_processing(invoice.id)
+        return invoice
 
-    async def _populate_from_extraction(
+    async def populate_from_extraction(
         self,
         db: AsyncSession,
         invoice: Invoice,
         extracted: ExtractedInvoice,
     ) -> None:
+        import asyncio
+
         if extracted.fornecedor:
             emitter = await self._get_or_create_emitter_by_name(db, extracted.fornecedor)
             invoice.emitter_id = emitter.id
@@ -155,7 +129,11 @@ class InvoiceService:
             invoice.total_amount = extracted.total
 
         descriptions = [item.descricao for item in extracted.itens]
-        embeddings = embedding_service.encode(descriptions) if descriptions else []
+        embeddings = (
+            await asyncio.to_thread(self._encode_descriptions, descriptions)
+            if descriptions
+            else []
+        )
 
         for idx, item in enumerate(extracted.itens):
             embedding = embeddings[idx] if idx < len(embeddings) else None
@@ -173,6 +151,12 @@ class InvoiceService:
                     embedding=embedding,
                 )
             )
+
+    @staticmethod
+    def _encode_descriptions(descriptions: list[str]) -> list[list[float]]:
+        from app.services.embedding_service import embedding_service
+
+        return embedding_service.encode(descriptions)
 
     async def _get_or_create_emitter_by_name(self, db: AsyncSession, name: str) -> Emitter:
         normalized = name.strip().upper()

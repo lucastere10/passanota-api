@@ -3,7 +3,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models import ConviteRole
 
 
 class InviteCreateRequest(BaseModel):

@@ -4,8 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db_session
-from app.integrations.resend import ResendError
-from app.integrations.supabase import SupabaseAuthError, SupabaseConfigError
 from app.schemas.auth import AuthUser
 from app.schemas.auth_api import (
     AuthMeResponse,
@@ -23,11 +21,8 @@ async def send_magic_link(
     payload: MagicLinkRequest,
     db: AsyncSession = Depends(get_db_session),
 ) -> MagicLinkResponse:
-    try:
-        await auth_service.send_magic_link(db, payload.email)
-        await db.commit()
-    except (ResendError, SupabaseConfigError, SupabaseAuthError):
-        pass
+    await auth_service.send_magic_link(db, payload.email)
+    await db.commit()
     return MagicLinkResponse()
 
 
