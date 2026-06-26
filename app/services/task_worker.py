@@ -28,6 +28,8 @@ class TaskWorker:
     async def process_invoice(self, db: AsyncSession, invoice_id: uuid.UUID) -> None:
         from app.services.invoice_service import invoice_service
 
+        logger.info("Invoice %s: processing started", invoice_id)
+
         invoice = await invoice_service.get_by_id(db, invoice_id)
         if not invoice:
             logger.warning("Invoice %s not found for processing", invoice_id)
@@ -41,25 +43,23 @@ class TaskWorker:
         await db.commit()
 
         if not invoice.photo_original_path:
-            invoice.status = InvoiceStatus.FAILED
-            invoice.error_message = "Original photo not found in storage"
-            await db.commit()
+            await self._fail_invoice(
+                db, invoice, invoice_id, "Original photo not found in storage"
+            )
             return
 
+        logger.info("Invoice %s: downloading original photo", invoice_id)
         try:
             image_bytes = await invoice_photo_storage.download(invoice.photo_original_path)
         except StorageError as exc:
-            invoice.status = InvoiceStatus.FAILED
-            invoice.error_message = str(exc)
-            await db.commit()
+            await self._fail_invoice(db, invoice, invoice_id, str(exc))
             return
 
+        logger.info("Invoice %s: preprocessing image (%d bytes)", invoice_id, len(image_bytes))
         try:
             preprocess_result = await asyncio.to_thread(preprocess_image, image_bytes)
         except Exception as exc:
-            invoice.status = InvoiceStatus.FAILED
-            invoice.error_message = f"Preprocess failed: {exc}"
-            await db.commit()
+            await self._fail_invoice(db, invoice, invoice_id, f"Preprocess failed: {exc}")
             return
 
         _, processed_path = invoice_photo_storage.build_paths(invoice.id, invoice.empresa_id)
@@ -70,9 +70,11 @@ class TaskWorker:
                 preprocess_result.content_type,
             )
             invoice.photo_processed_path = processed_path
-        except StorageError:
-            pass
+            await db.commit()
+        except StorageError as exc:
+            logger.warning("Invoice %s: processed photo upload skipped: %s", invoice_id, exc)
 
+        logger.info("Invoice %s: running vision extraction (provider=%s)", invoice_id, settings.llm_provider)
         try:
             extractor = get_vision_extractor()
             extraction_result = await extractor.extract(
@@ -85,17 +87,39 @@ class TaskWorker:
             await invoice_service.populate_from_extraction(
                 db, invoice, extraction_result.invoice
             )
+            logger.info(
+                "Invoice %s: extracted %d items",
+                invoice_id,
+                len(extraction_result.invoice.itens),
+            )
             await db.execute(
                 text("SELECT normalize_invoice_items(:invoice_id)"),
                 {"invoice_id": invoice.id},
             )
             invoice.status = InvoiceStatus.PARSED
+            invoice.error_message = None
         except (VisionExtractorError, ValueError) as exc:
-            invoice.status = InvoiceStatus.FAILED
-            invoice.error_message = str(exc)
+            await self._fail_invoice(db, invoice, invoice_id, str(exc))
+            return
+        except Exception as exc:
+            logger.exception("Invoice %s: unexpected extraction error", invoice_id)
+            await self._fail_invoice(db, invoice, invoice_id, f"Extraction failed: {exc}")
+            return
 
         await db.commit()
-        logger.info("Invoice %s processing finished with status=%s", invoice_id, invoice.status)
+        logger.info("Invoice %s: processing finished status=%s", invoice_id, invoice.status)
+
+    async def _fail_invoice(
+        self,
+        db: AsyncSession,
+        invoice: Invoice,
+        invoice_id: uuid.UUID,
+        message: str,
+    ) -> None:
+        invoice.status = InvoiceStatus.FAILED
+        invoice.error_message = message
+        await db.commit()
+        logger.error("Invoice %s: processing failed — %s", invoice_id, message)
 
     async def send_email(self, db: AsyncSession, task: SendEmailTask) -> None:
         if task.type == "magic_link":
@@ -136,13 +160,13 @@ async def run_process_invoice_task(invoice_id: uuid.UUID) -> None:
     async with AsyncSessionLocal() as db:
         try:
             await task_worker.process_invoice(db, invoice_id)
-        except Exception:
+        except Exception as exc:
             logger.exception("Unhandled error processing invoice %s", invoice_id)
             await db.rollback()
             invoice = await db.get(Invoice, invoice_id)
             if invoice and invoice.status == InvoiceStatus.PENDING:
                 invoice.status = InvoiceStatus.FAILED
-                invoice.error_message = "Processing failed after retries"
+                invoice.error_message = f"Processing failed: {exc}"
                 await db.commit()
 
 

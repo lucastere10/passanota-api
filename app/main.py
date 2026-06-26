@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -10,6 +11,17 @@ from app.database import engine
 from app.routers import admin, auth, dashboard, devices, empresas, health, internal_tasks, invoices, public, search
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+def _configure_logging() -> None:
+    level = logging.DEBUG if settings.debug else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)s %(name)s: %(message)s",
+        force=True,
+    )
+    logging.getLogger("app").setLevel(level)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -23,8 +35,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Embeddings carregam sob demanda (primeira busca semântica) para não
-    # bloquear o bind do servidor — o download do modelo excede a startup probe.
+    _configure_logging()
+    logger.info(
+        "API started (cloud_tasks=%s, llm_provider=%s, embeddings=%s)",
+        settings.cloud_tasks_enabled,
+        settings.llm_provider or "not set",
+        settings.embeddings_enabled,
+    )
     yield
     await engine.dispose()
 

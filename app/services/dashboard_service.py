@@ -21,14 +21,24 @@ from app.services.invoice_service import resolve_period
 
 
 class DashboardService:
+    def _period_filters(
+        self, period_start: datetime, period_end: datetime, empresa_id: uuid.UUID | None = None
+    ):
+        filters = [
+            Invoice.created_at >= period_start,
+            Invoice.created_at <= period_end,
+        ]
+        if empresa_id:
+            filters.append(Invoice.empresa_id == empresa_id)
+        return and_(*filters)
+
     def _base_filters(
         self, period_start: datetime, period_end: datetime, empresa_id: uuid.UUID | None = None
     ):
         filters = [
             Invoice.status == InvoiceStatus.PARSED,
-            Invoice.issued_at.is_not(None),
-            Invoice.issued_at >= period_start,
-            Invoice.issued_at <= period_end,
+            Invoice.created_at >= period_start,
+            Invoice.created_at <= period_end,
         ]
         if empresa_id:
             filters.append(Invoice.empresa_id == empresa_id)
@@ -43,31 +53,37 @@ class DashboardService:
         empresa_id: uuid.UUID | None = None,
     ) -> DashboardSummaryResponse:
         period_start, period_end = resolve_period(period, date_from, date_to)
-        filters = self._base_filters(period_start, period_end, empresa_id)
+        period_filters = self._period_filters(period_start, period_end, empresa_id)
+        parsed_filters = self._base_filters(period_start, period_end, empresa_id)
 
-        result = await db.execute(
-            select(
-                func.coalesce(func.sum(Invoice.total_amount), 0),
-                func.count(Invoice.id),
-            ).where(filters)
+        count_result = await db.execute(
+            select(func.count(Invoice.id)).where(period_filters)
         )
-        total_spend, invoice_count = result.one()
-        total_spend = Decimal(str(total_spend))
-        invoice_count = int(invoice_count)
-        avg_ticket = total_spend / invoice_count if invoice_count else Decimal("0")
+        invoice_count = int(count_result.scalar_one())
+
+        spend_result = await db.execute(
+            select(func.coalesce(func.sum(Invoice.total_amount), 0)).where(parsed_filters)
+        )
+        total_spend = Decimal(str(spend_result.scalar_one()))
 
         duration = period_end - period_start
         prev_end = period_start
         prev_start = period_start - duration
-        prev_filters = self._base_filters(prev_start, prev_end, empresa_id)
+        prev_parsed_filters = self._base_filters(prev_start, prev_end, empresa_id)
 
         prev_result = await db.execute(
-            select(func.coalesce(func.sum(Invoice.total_amount), 0)).where(prev_filters)
+            select(func.coalesce(func.sum(Invoice.total_amount), 0)).where(prev_parsed_filters)
         )
         prev_total = Decimal(str(prev_result.scalar_one()))
         change_pct = None
         if prev_total > 0:
             change_pct = float(((total_spend - prev_total) / prev_total) * 100)
+
+        parsed_count_result = await db.execute(
+            select(func.count(Invoice.id)).where(parsed_filters)
+        )
+        parsed_count = int(parsed_count_result.scalar_one())
+        avg_ticket = total_spend / parsed_count if parsed_count else Decimal("0")
 
         return DashboardSummaryResponse(
             total_spend=decimal_to_str(total_spend) or "0.00",
@@ -93,14 +109,13 @@ class DashboardService:
         empresa_filter = "AND empresa_id = :empresa_id" if empresa_id else ""
         query = text(
             f"""
-            SELECT date_trunc(:trunc_unit, issued_at) AS bucket,
+            SELECT date_trunc(:trunc_unit, created_at) AS bucket,
                    COALESCE(SUM(total_amount), 0) AS amount,
                    COUNT(id) AS count
             FROM invoices
             WHERE status = 'parsed'
-              AND issued_at IS NOT NULL
-              AND issued_at >= :period_start
-              AND issued_at <= :period_end
+              AND created_at >= :period_start
+              AND created_at <= :period_end
               {empresa_filter}
             GROUP BY bucket
             ORDER BY bucket

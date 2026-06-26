@@ -11,8 +11,11 @@ from app.schemas.auth import AuthContext, CaptureContext
 from app.schemas.invoice import (
     CaptureInvoiceResponse,
     ExtractionSummary,
+    InvoiceItemResponse,
     InvoiceResponse,
     PaginatedInvoicesResponse,
+    UpdateInvoiceItemRequest,
+    UpdateInvoiceRequest,
     invoice_to_response,
 )
 from app.services.device_service import device_service
@@ -75,9 +78,13 @@ async def list_invoices(
     page_size: int = Query(default=20, ge=1, le=100),
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     uf: str | None = None,
     emitter_cnpj: str | None = None,
     status: InvoiceStatus | None = None,
+    sort_by: str = Query(default="created_at", pattern="^(created_at|issued_at|status)$"),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db_session),
 ) -> PaginatedInvoicesResponse:
     invoices, total = await invoice_service.list_invoices(
@@ -86,10 +93,14 @@ async def list_invoices(
         page_size=page_size,
         date_from=date_from,
         date_to=date_to,
+        created_from=created_from,
+        created_to=created_to,
         uf=uf,
         emitter_cnpj=emitter_cnpj,
         status=status,
         empresa_id=auth.empresa_id,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     return PaginatedInvoicesResponse(
         data=[invoice_to_response(inv) for inv in invoices],
@@ -109,3 +120,80 @@ async def get_invoice(
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     return invoice_to_response(invoice)
+
+
+@router.patch("/{invoice_id}", response_model=InvoiceResponse)
+async def update_invoice(
+    invoice_id: UUID,
+    payload: UpdateInvoiceRequest,
+    auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
+    db: AsyncSession = Depends(get_db_session),
+) -> InvoiceResponse:
+    invoice = await invoice_service.update_invoice(
+        db,
+        invoice_id,
+        auth.empresa_id,
+        issued_at=payload.issued_at,
+        total_amount=payload.total_amount,
+        discount_amount=payload.discount_amount,
+        emitter_name=payload.emitter_name,
+    )
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    return invoice_to_response(invoice)
+
+
+@router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_invoice(
+    invoice_id: UUID,
+    auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    deleted = await invoice_service.delete_invoice(db, invoice_id, empresa_id=auth.empresa_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+
+
+@router.patch("/{invoice_id}/items/{item_id}", response_model=InvoiceItemResponse)
+async def update_invoice_item(
+    invoice_id: UUID,
+    item_id: UUID,
+    payload: UpdateInvoiceItemRequest,
+    auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
+    db: AsyncSession = Depends(get_db_session),
+) -> InvoiceItemResponse:
+    item = await invoice_service.update_invoice_item(
+        db,
+        invoice_id,
+        item_id,
+        auth.empresa_id,
+        description=payload.description,
+        quantity=payload.quantity,
+        unit_price=payload.unit_price,
+        total_price=payload.total_price,
+        unit=payload.unit,
+    )
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    invoice = await invoice_service.get_by_id(db, invoice_id, empresa_id=auth.empresa_id)
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    response = invoice_to_response(invoice)
+    updated = next((i for i in response.items if i.id == item_id), None)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    return updated
+
+
+@router.delete("/{invoice_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_invoice_item(
+    invoice_id: UUID,
+    item_id: UUID,
+    auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    deleted = await invoice_service.delete_invoice_item(
+        db, invoice_id, item_id, empresa_id=auth.empresa_id
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
