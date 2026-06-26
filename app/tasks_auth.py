@@ -9,6 +9,19 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def task_oidc_audience(request: Request) -> str:
+    """OIDC audience must match the HTTPS URL used when enqueuing the task.
+
+    Cloud Run terminates TLS and forwards HTTP to the app, so ``request.url``
+    would use ``http://`` and fail token verification.
+    """
+    settings = get_settings()
+    base = settings.task_handler_base_url.rstrip("/")
+    if base:
+        return f"{base}{request.url.path}"
+    return str(request.url.replace(scheme="https"))
+
+
 async def verify_cloud_tasks_request(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -45,7 +58,7 @@ async def verify_cloud_tasks_request(
         )
 
     token = authorization.removeprefix("Bearer ").strip()
-    audience = str(request.url)
+    audience = task_oidc_audience(request)
 
     try:
         id_token.verify_oauth2_token(token, google_requests.Request(), audience=audience)
