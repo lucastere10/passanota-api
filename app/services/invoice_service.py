@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.config import get_settings
 from app.models import Emitter, Invoice, InvoiceItem, InvoiceSource, InvoiceStatus
 from app.schemas.extraction import ExtractedInvoice
+from app.schemas.invoice import str_to_decimal
 from app.services.image.storage import StorageError, invoice_photo_storage
 from app.services.task_dispatcher import dispatch_invoice_processing
 
@@ -35,11 +36,15 @@ class InvoiceService:
         page_size: int = 20,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
         uf: str | None = None,
         emitter_cnpj: str | None = None,
         status: InvoiceStatus | None = None,
         empresa_id: uuid.UUID | None = None,
         device_id: uuid.UUID | None = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
     ) -> tuple[list[Invoice], int]:
         filters = []
 
@@ -47,6 +52,10 @@ class InvoiceService:
             filters.append(Invoice.issued_at >= date_from)
         if date_to:
             filters.append(Invoice.issued_at <= date_to)
+        if created_from:
+            filters.append(Invoice.created_at >= created_from)
+        if created_to:
+            filters.append(Invoice.created_at <= created_to)
         if uf:
             filters.append(Invoice.uf == uf.upper())
         if status:
@@ -65,12 +74,28 @@ class InvoiceService:
         count_result = await db.execute(select(func.count()).select_from(Invoice).where(where_clause))
         total = count_result.scalar_one()
 
+        sort_columns = {
+            "created_at": Invoice.created_at,
+            "issued_at": Invoice.issued_at,
+            "status": Invoice.status,
+        }
+        sort_column = sort_columns.get(sort_by, Invoice.created_at)
+        descending = sort_order != "asc"
+        if sort_by == "issued_at":
+            primary_order = (
+                sort_column.desc().nullslast()
+                if descending
+                else sort_column.asc().nullsfirst()
+            )
+        else:
+            primary_order = sort_column.desc() if descending else sort_column.asc()
+
         offset = (page - 1) * page_size
         result = await db.execute(
             select(Invoice)
             .options(selectinload(Invoice.emitter), selectinload(Invoice.items))
             .where(where_clause)
-            .order_by(Invoice.issued_at.desc().nullslast(), Invoice.created_at.desc())
+            .order_by(primary_order, Invoice.created_at.desc())
             .offset(offset)
             .limit(page_size)
         )
@@ -106,9 +131,14 @@ class InvoiceService:
             raise ValueError(f"Failed to store image: {exc}") from exc
 
         await db.commit()
-        await db.refresh(invoice)
         await dispatch_invoice_processing(invoice.id)
-        return invoice
+
+        result = await db.execute(
+            select(Invoice)
+            .options(selectinload(Invoice.emitter), selectinload(Invoice.items))
+            .where(Invoice.id == invoice.id)
+        )
+        return result.scalar_one()
 
     async def populate_from_extraction(
         self,
@@ -181,6 +211,108 @@ class InvoiceService:
             except ValueError:
                 continue
         return None
+
+    async def delete_invoice(
+        self, db: AsyncSession, invoice_id: uuid.UUID, empresa_id: uuid.UUID | None = None
+    ) -> bool:
+        invoice = await self.get_by_id(db, invoice_id, empresa_id)
+        if not invoice:
+            return False
+        await db.delete(invoice)
+        await db.commit()
+        return True
+
+    async def update_invoice(
+        self,
+        db: AsyncSession,
+        invoice_id: uuid.UUID,
+        empresa_id: uuid.UUID | None,
+        *,
+        issued_at: datetime | None = None,
+        total_amount: str | None = None,
+        discount_amount: str | None = None,
+        emitter_name: str | None = None,
+    ) -> Invoice | None:
+        invoice = await self.get_by_id(db, invoice_id, empresa_id)
+        if not invoice:
+            return None
+
+        if issued_at is not None:
+            invoice.issued_at = issued_at
+        if total_amount is not None:
+            invoice.total_amount = str_to_decimal(total_amount)
+        if discount_amount is not None:
+            invoice.discount_amount = str_to_decimal(discount_amount)
+        if emitter_name is not None:
+            emitter = await self._get_or_create_emitter_by_name(db, emitter_name)
+            invoice.emitter_id = emitter.id
+
+        await db.commit()
+        return await self.get_by_id(db, invoice_id, empresa_id)
+
+    async def update_invoice_item(
+        self,
+        db: AsyncSession,
+        invoice_id: uuid.UUID,
+        item_id: uuid.UUID,
+        empresa_id: uuid.UUID | None,
+        *,
+        description: str | None = None,
+        quantity: str | None = None,
+        unit_price: str | None = None,
+        total_price: str | None = None,
+        unit: str | None = None,
+    ) -> InvoiceItem | None:
+        invoice = await self.get_by_id(db, invoice_id, empresa_id)
+        if not invoice:
+            return None
+
+        result = await db.execute(
+            select(InvoiceItem).where(
+                InvoiceItem.id == item_id, InvoiceItem.invoice_id == invoice_id
+            )
+        )
+        item = result.scalar_one_or_none()
+        if not item:
+            return None
+
+        if description is not None:
+            item.description = description
+        if quantity is not None:
+            item.quantity = str_to_decimal(quantity)
+        if unit_price is not None:
+            item.unit_price = str_to_decimal(unit_price)
+        if total_price is not None:
+            item.total_price = str_to_decimal(total_price)
+        if unit is not None:
+            item.unit = unit
+
+        await db.commit()
+        return item
+
+    async def delete_invoice_item(
+        self,
+        db: AsyncSession,
+        invoice_id: uuid.UUID,
+        item_id: uuid.UUID,
+        empresa_id: uuid.UUID | None = None,
+    ) -> bool:
+        invoice = await self.get_by_id(db, invoice_id, empresa_id)
+        if not invoice:
+            return False
+
+        result = await db.execute(
+            select(InvoiceItem).where(
+                InvoiceItem.id == item_id, InvoiceItem.invoice_id == invoice_id
+            )
+        )
+        item = result.scalar_one_or_none()
+        if not item:
+            return False
+
+        await db.delete(item)
+        await db.commit()
+        return True
 
 
 invoice_service = InvoiceService()

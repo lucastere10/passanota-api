@@ -47,6 +47,14 @@ def _normalize_payload(payload: dict) -> dict:
     return payload
 
 
+def _openai_token_limit_param(model: str, limit: int) -> dict[str, int]:
+    """OpenAI reasoning / GPT-5+ models require max_completion_tokens instead of max_tokens."""
+    name = model.lower()
+    if name.startswith(("o1", "o3", "o4", "gpt-5")):
+        return {"max_completion_tokens": limit}
+    return {"max_tokens": limit}
+
+
 class OpenAIVisionExtractor:
     def __init__(self, api_key: str, model: str) -> None:
         self._api_key = api_key
@@ -71,7 +79,7 @@ class OpenAIVisionExtractor:
                         }
                     ],
                     "response_format": {"type": "json_object"},
-                    "max_tokens": 4096,
+                    **_openai_token_limit_param(self._model, 4096),
                 },
             )
         if response.status_code != 200:

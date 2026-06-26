@@ -44,14 +44,14 @@ async def semantic_search(
                inv.id AS invoice_id,
                ii.description,
                ii.total_price,
-               1 - (ii.embedding <=> :query_vector::vector) AS similarity,
+               1 - (ii.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                inv.issued_at,
                COALESCE(e.trade_name, e.legal_name) AS emitter_name
         FROM invoice_items ii
         JOIN invoices inv ON inv.id = ii.invoice_id
         LEFT JOIN emitters e ON e.id = inv.emitter_id
         WHERE {where_clause}
-        ORDER BY ii.embedding <=> :query_vector::vector
+        ORDER BY ii.embedding <=> CAST(:query_vector AS vector)
         LIMIT :limit
         """
     )

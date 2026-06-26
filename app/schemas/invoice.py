@@ -73,6 +73,10 @@ class CaptureInvoiceResponse(BaseModel):
     processed_image_url: str | None = None
     preprocess_skipped: bool = False
     extraction_summary: ExtractionSummary
+    processing_note: str = (
+        "Nota recebida. O processamento com IA roda em segundo plano — "
+        "acompanhe o status pela lista de notas ou pelo ID retornado."
+    )
 
 
 class PaginatedInvoicesResponse(BaseModel):
@@ -80,6 +84,27 @@ class PaginatedInvoicesResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class UpdateInvoiceRequest(BaseModel):
+    issued_at: datetime | None = None
+    total_amount: str | None = None
+    discount_amount: str | None = None
+    emitter_name: str | None = None
+
+
+class UpdateInvoiceItemRequest(BaseModel):
+    description: str | None = None
+    quantity: str | None = None
+    unit_price: str | None = None
+    total_price: str | None = None
+    unit: str | None = None
+
+
+def str_to_decimal(value: str | None) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(value)
 
 
 def decimal_to_str(value: Decimal | None) -> str | None:
