@@ -54,6 +54,7 @@ class InvoiceResponse(BaseModel):
     photo_original_path: str | None = None
     photo_processed_path: str | None = None
     ai_model: str | None = None
+    ai_confidence: str | None = None
     extracted_at: datetime | None = None
     status: InvoiceStatus
     error_message: str | None = None
@@ -152,6 +153,7 @@ def invoice_to_response(invoice) -> InvoiceResponse:
         photo_original_path=invoice.photo_original_path,
         photo_processed_path=invoice.photo_processed_path,
         ai_model=invoice.ai_model,
+        ai_confidence=decimal_to_str(invoice.ai_confidence),
         extracted_at=invoice.extracted_at,
         status=invoice.status,
         error_message=invoice.error_message,

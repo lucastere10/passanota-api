@@ -20,6 +20,7 @@ class ExtractedInvoice(BaseModel):
     data: str | None = None
     itens: list[ExtractedItem] = Field(default_factory=list)
     total: Decimal | None = Field(default=None, ge=0)
+    confianca: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @field_validator("fornecedor")
     @classmethod

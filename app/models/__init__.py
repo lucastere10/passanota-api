@@ -252,6 +252,7 @@ class Invoice(Base):
     photo_processed_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_raw_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     ai_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ai_confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

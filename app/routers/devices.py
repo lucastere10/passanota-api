@@ -19,7 +19,7 @@ from app.schemas.device import (
     DeviceUpdateRequest,
     PairingSessionResponse,
 )
-from app.schemas.invoice import PaginatedInvoicesResponse, invoice_to_response
+from app.schemas.invoice import InvoiceResponse, PaginatedInvoicesResponse, invoice_to_response
 from app.services.device_service import DeviceServiceError, device_service
 from app.services.invoice_service import invoice_service
 
@@ -181,3 +181,19 @@ async def list_device_invoices(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/me/invoices/{invoice_id}", response_model=InvoiceResponse)
+async def get_device_invoice(
+    invoice_id: uuid.UUID,
+    device_ctx: Annotated[DeviceContext, Depends(get_device_context)],
+    db: AsyncSession = Depends(get_db_session),
+) -> InvoiceResponse:
+    invoice = await invoice_service.get_by_id(
+        db,
+        invoice_id,
+        empresa_id=device_ctx.empresa_id,
+    )
+    if not invoice or invoice.device_id != device_ctx.device_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    return invoice_to_response(invoice)
