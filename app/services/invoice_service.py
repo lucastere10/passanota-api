@@ -158,6 +158,11 @@ class InvoiceService:
         if extracted.total is not None:
             invoice.total_amount = extracted.total
 
+        if extracted.confianca is not None:
+            from decimal import Decimal
+
+            invoice.ai_confidence = Decimal(str(round(extracted.confianca, 2)))
+
         descriptions = [item.descricao for item in extracted.itens]
         embeddings = (
             await asyncio.to_thread(self._encode_descriptions, descriptions)

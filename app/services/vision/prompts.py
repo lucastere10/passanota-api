@@ -11,7 +11,8 @@ Extraia os dados e retorne APENAS um JSON válido, sem markdown, no formato:
       "quantidade": 1
     }
   ],
-  "total": 12.99
+  "total": 12.99,
+  "confianca": 0.85
 }
 
 Regras:
@@ -20,6 +21,7 @@ Regras:
 - "itens" lista cada produto com "descricao" e "valor" (preço total da linha)
 - "quantidade" é opcional
 - "total" é o total da nota; use null se não legível
+- "confianca" é um número entre 0.0 e 1.0 indicando o quão confiante você está na extração (legibilidade da imagem, completude dos campos e consistência entre soma dos itens e total)
 - Valores numéricos como número, não string
 - Se não conseguir ler itens, retorne "itens": []
 """
