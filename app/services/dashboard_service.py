@@ -116,15 +116,16 @@ class DashboardService:
             empresa_filter = "AND i.empresa_id = :empresa_id" if empresa_id else ""
             query = text(
                 f"""
-                SELECT date_trunc(:trunc_unit, i.created_at) AS bucket,
+                SELECT date_trunc(:trunc_unit, i.issued_at) AS bucket,
                        COALESCE(SUM(ii.total_price), 0) AS amount,
                        COUNT(DISTINCT i.id) AS count
                 FROM invoices i
                 JOIN invoice_items ii ON ii.invoice_id = i.id
                 JOIN categories c ON c.id = ii.category_id
                 WHERE i.status = 'parsed'
-                  AND i.created_at >= :period_start
-                  AND i.created_at <= :period_end
+                  AND i.issued_at IS NOT NULL
+                  AND i.issued_at >= :period_start
+                  AND i.issued_at <= :period_end
                   AND c.slug = :category_slug
                   {empresa_filter}
                 GROUP BY bucket
@@ -144,13 +145,14 @@ class DashboardService:
             empresa_filter = "AND empresa_id = :empresa_id" if empresa_id else ""
             query = text(
                 f"""
-                SELECT date_trunc(:trunc_unit, created_at) AS bucket,
+                SELECT date_trunc(:trunc_unit, issued_at) AS bucket,
                        COALESCE(SUM(total_amount), 0) AS amount,
                        COUNT(id) AS count
                 FROM invoices
                 WHERE status = 'parsed'
-                  AND created_at >= :period_start
-                  AND created_at <= :period_end
+                  AND issued_at IS NOT NULL
+                  AND issued_at >= :period_start
+                  AND issued_at <= :period_end
                   {empresa_filter}
                 GROUP BY bucket
                 ORDER BY bucket
@@ -190,7 +192,7 @@ class DashboardService:
 
         query = text(
             f"""
-            SELECT date_trunc(:trunc_unit, i.created_at) AS bucket,
+            SELECT date_trunc(:trunc_unit, i.issued_at) AS bucket,
                    COALESCE(c.name, 'Outros') AS category_name,
                    COALESCE(c.slug, 'outros') AS category_slug,
                    COALESCE(SUM(ii.total_price), 0) AS amount
@@ -198,8 +200,9 @@ class DashboardService:
             JOIN invoice_items ii ON ii.invoice_id = i.id
             LEFT JOIN categories c ON c.id = ii.category_id
             WHERE i.status = 'parsed'
-              AND i.created_at >= :period_start
-              AND i.created_at <= :period_end
+              AND i.issued_at IS NOT NULL
+              AND i.issued_at >= :period_start
+              AND i.issued_at <= :period_end
               {empresa_filter}
             GROUP BY bucket, c.name, c.slug
             ORDER BY bucket, amount DESC
