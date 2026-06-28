@@ -88,6 +88,11 @@ class InviteService:
         magic_link = await generate_magic_link(convite.email, redirect_to)
         await send_invite_email(convite.email, magic_link, empresa.nome, convite.role.value)
 
+    async def mark_invite_accepted(self, db: AsyncSession, convite: Convite) -> None:
+        if convite.accepted_at is None:
+            convite.accepted_at = datetime.now(timezone.utc)
+            await db.flush()
+
     async def accept_invite(
         self,
         db: AsyncSession,
@@ -107,8 +112,14 @@ class InviteService:
                 Funcionario.user_id == user_id,
             )
         )
-        if existing.scalar_one_or_none():
-            raise ValueError("Usuário já é membro desta empresa")
+        existing_funcionario = existing.scalar_one_or_none()
+        if existing_funcionario:
+            trimmed = nome.strip()
+            if trimmed and existing_funcionario.nome != trimmed:
+                existing_funcionario.nome = trimmed
+            convite.accepted_at = now
+            await db.flush()
+            return existing_funcionario
 
         funcionario_role = (
             FuncionarioRole.GESTOR if convite.role == ConviteRole.GESTOR else FuncionarioRole.OPERADOR

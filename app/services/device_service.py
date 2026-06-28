@@ -131,7 +131,7 @@ class DeviceService:
         result = await db.execute(
             select(Dispositivo, Empresa)
             .join(Empresa, Empresa.id == Dispositivo.empresa_id)
-            .where(Dispositivo.token_hash == token_hash, Dispositivo.is_active.is_(True))
+            .where(Dispositivo.token_hash == token_hash, Dispositivo.is_active.is_(True), Empresa.is_active.is_(True))
         )
         row = result.one_or_none()
         if row is None:

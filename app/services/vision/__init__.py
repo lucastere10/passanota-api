@@ -44,6 +44,10 @@ def _normalize_payload(payload: dict) -> dict:
         payload["itens"] = payload.pop("items")
     if "fornecedor" not in payload and "supplier" in payload:
         payload["fornecedor"] = payload.pop("supplier")
+    for item in payload.get("itens") or []:
+        if isinstance(item, dict):
+            if "categoria" not in item and "category" in item:
+                item["categoria"] = item.pop("category")
     return payload
 
 

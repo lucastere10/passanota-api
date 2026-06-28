@@ -33,6 +33,8 @@ class InvoiceItemResponse(BaseModel):
     unit_price: str | None = None
     total_price: str | None = None
     category_id: UUID | None = None
+    category_name: str | None = None
+    category_slug: str | None = None
 
 
 class InvoiceResponse(BaseModel):
@@ -100,6 +102,7 @@ class UpdateInvoiceItemRequest(BaseModel):
     unit_price: str | None = None
     total_price: str | None = None
     unit: str | None = None
+    category_id: UUID | None = None
 
 
 def str_to_decimal(value: str | None) -> Decimal | None:
@@ -114,23 +117,28 @@ def decimal_to_str(value: Decimal | None) -> str | None:
     return format(value, "f")
 
 
+def invoice_item_to_response(item) -> InvoiceItemResponse:
+    category_name = item.category.name if item.category else None
+    category_slug = item.category.slug if item.category else None
+    return InvoiceItemResponse(
+        id=item.id,
+        line_number=item.line_number,
+        product_code=item.product_code,
+        description=item.description,
+        ncm=item.ncm,
+        ean=item.ean,
+        quantity=decimal_to_str(item.quantity),
+        unit=item.unit,
+        unit_price=decimal_to_str(item.unit_price),
+        total_price=decimal_to_str(item.total_price),
+        category_id=item.category_id,
+        category_name=category_name,
+        category_slug=category_slug,
+    )
+
+
 def invoice_to_response(invoice) -> InvoiceResponse:
-    items = [
-        InvoiceItemResponse(
-            id=item.id,
-            line_number=item.line_number,
-            product_code=item.product_code,
-            description=item.description,
-            ncm=item.ncm,
-            ean=item.ean,
-            quantity=decimal_to_str(item.quantity),
-            unit=item.unit,
-            unit_price=decimal_to_str(item.unit_price),
-            total_price=decimal_to_str(item.total_price),
-            category_id=item.category_id,
-        )
-        for item in invoice.items
-    ]
+    items = [invoice_item_to_response(item) for item in invoice.items]
 
     emitter = None
     if invoice.emitter:

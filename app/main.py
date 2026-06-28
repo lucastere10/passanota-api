@@ -8,7 +8,7 @@ from starlette.responses import Response
 
 from app.config import get_settings
 from app.database import engine
-from app.routers import admin, auth, dashboard, devices, empresas, health, internal_tasks, invoices, public, search
+from app.routers import admin, auth, categories, dashboard, devices, empresas, health, internal_tasks, invoices, public, search
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ app.include_router(admin.router, prefix="/v1")
 app.include_router(empresas.router, prefix="/v1")
 app.include_router(devices.router, prefix="/v1")
 app.include_router(invoices.router, prefix="/v1")
+app.include_router(categories.router, prefix="/v1")
 app.include_router(dashboard.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(internal_tasks.router)

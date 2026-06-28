@@ -162,17 +162,22 @@ async def update_invoice_item(
     auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
     db: AsyncSession = Depends(get_db_session),
 ) -> InvoiceItemResponse:
-    item = await invoice_service.update_invoice_item(
-        db,
-        invoice_id,
-        item_id,
-        auth.empresa_id,
-        description=payload.description,
-        quantity=payload.quantity,
-        unit_price=payload.unit_price,
-        total_price=payload.total_price,
-        unit=payload.unit,
-    )
+    try:
+        item = await invoice_service.update_invoice_item(
+            db,
+            invoice_id,
+            item_id,
+            auth.empresa_id,
+            description=payload.description,
+            quantity=payload.quantity,
+            unit_price=payload.unit_price,
+            total_price=payload.total_price,
+            unit=payload.unit,
+            category_id=payload.category_id,
+            category_id_set="category_id" in payload.model_fields_set,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     invoice = await invoice_service.get_by_id(db, invoice_id, empresa_id=auth.empresa_id)
