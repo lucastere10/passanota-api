@@ -105,13 +105,17 @@ class AuthService:
         if email:
             convite = await invite_service.get_pending_by_email(db, email)
             if convite:
-                empresa = await db.get(Empresa, convite.empresa_id)
-                pending_invite = PendingInvite(
-                    id=convite.id,
-                    empresa_id=convite.empresa_id,
-                    empresa_nome=empresa.nome if empresa else "",
-                    role=convite.role.value,
-                )
+                already_member = any(m.id == convite.empresa_id for m in empresas)
+                if already_member:
+                    await invite_service.mark_invite_accepted(db, convite)
+                else:
+                    empresa = await db.get(Empresa, convite.empresa_id)
+                    pending_invite = PendingInvite(
+                        id=convite.id,
+                        empresa_id=convite.empresa_id,
+                        empresa_nome=empresa.nome if empresa else "",
+                        role=convite.role.value,
+                    )
 
         profile_complete = (len(empresas) > 0 or is_platform_admin) and pending_invite is None
 

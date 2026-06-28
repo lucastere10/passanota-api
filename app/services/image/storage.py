@@ -1,12 +1,17 @@
+import logging
 import uuid
 
 from app.config import get_settings
 from app.integrations.supabase import (
     SupabaseConfigError,
     create_signed_storage_url,
+    delete_storage_objects,
     download_storage_object,
+    list_storage_prefix,
     upload_storage_object,
 )
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -54,6 +59,21 @@ class InvoicePhotoStorage:
             raise StorageError(str(exc)) from exc
         except Exception as exc:
             raise StorageError(f"Download failed: {exc}") from exc
+
+    async def clear_empresa_prefix(self, empresa_id: uuid.UUID) -> int:
+        self._require_config()
+        prefix = str(empresa_id)
+        try:
+            paths = await list_storage_prefix(self._bucket, prefix)
+            if not paths:
+                return 0
+            return await delete_storage_objects(self._bucket, paths)
+        except SupabaseConfigError as exc:
+            logger.warning("Storage not configured during empresa clear: %s", exc)
+            return 0
+        except Exception as exc:
+            logger.warning("Failed to clear storage prefix %s: %s", prefix, exc)
+            return 0
 
 
 invoice_photo_storage = InvoicePhotoStorage()

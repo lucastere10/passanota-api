@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -7,14 +8,39 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db_session, require_platform_admin
-from app.models import Convite, ConviteRole, Empresa, PlatformAdmin
-from app.schemas.admin import AdminEmpresaCreate, AdminEmpresaListItem, AdminEmpresaResponse
+from app.models import ConviteRole, Empresa, PlatformAdmin
+from app.schemas.admin import (
+    AdminEmpresaClearDataRequest,
+    AdminEmpresaClearDataResponse,
+    AdminEmpresaCreate,
+    AdminEmpresaDetail,
+    AdminEmpresaListItem,
+    AdminEmpresaResponse,
+    AdminEmpresaUpdate,
+    AdminPlatformOverview,
+)
 from app.schemas.invite import InviteResponse, OperadorInviteRequest
 from app.schemas.tasks import SendEmailTask
+from app.services.admin_service import (
+    DEFAULT_MONTHLY_INVOICE_LIMIT,
+    EmpresaClearDataError,
+    EmpresaNotFoundError,
+    admin_service,
+)
 from app.services.invite_service import invite_service
 from app.services.task_dispatcher import dispatch_email_task
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/overview", response_model=AdminPlatformOverview)
+async def get_overview(
+    _admin: Annotated[PlatformAdmin, Depends(require_platform_admin)],
+    db: AsyncSession = Depends(get_db_session),
+) -> AdminPlatformOverview:
+    data = await admin_service.get_platform_overview(db)
+    return AdminPlatformOverview(**data)
 
 
 @router.get("/empresas", response_model=list[AdminEmpresaListItem])
@@ -28,24 +54,53 @@ async def list_empresas(
 
     items: list[AdminEmpresaListItem] = []
     for empresa in empresas:
-        convite_result = await db.execute(
-            select(Convite.id).where(
-                Convite.empresa_id == empresa.id,
-                Convite.role == ConviteRole.GESTOR,
-                Convite.accepted_at.is_(None),
-                Convite.expires_at > now,
-            ).limit(1)
-        )
-        items.append(
-            AdminEmpresaListItem(
-                id=empresa.id,
-                nome=empresa.nome,
-                cnpj=empresa.cnpj,
-                created_at=empresa.created_at,
-                gestor_convite_pendente=convite_result.scalar_one_or_none() is not None,
-            )
-        )
+        item_data = await admin_service.build_empresa_list_item(db, empresa, now)
+        items.append(AdminEmpresaListItem(**item_data))
     return items
+
+
+@router.get("/empresas/{empresa_id}", response_model=AdminEmpresaDetail)
+async def get_empresa(
+    empresa_id: uuid.UUID,
+    _admin: Annotated[PlatformAdmin, Depends(require_platform_admin)],
+    db: AsyncSession = Depends(get_db_session),
+) -> AdminEmpresaDetail:
+    empresa = await db.get(Empresa, empresa_id)
+    if not empresa:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada")
+
+    item_data = await admin_service.build_empresa_list_item(db, empresa)
+    return AdminEmpresaDetail(**item_data, updated_at=empresa.updated_at)
+
+
+@router.patch("/empresas/{empresa_id}", response_model=AdminEmpresaDetail)
+async def update_empresa(
+    empresa_id: uuid.UUID,
+    payload: AdminEmpresaUpdate,
+    _admin: Annotated[PlatformAdmin, Depends(require_platform_admin)],
+    db: AsyncSession = Depends(get_db_session),
+) -> AdminEmpresaDetail:
+    empresa = await db.get(Empresa, empresa_id)
+    if not empresa:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada")
+
+    if payload.nome is not None:
+        empresa.nome = payload.nome
+    if payload.cnpj is not None:
+        empresa.cnpj = payload.cnpj or None
+    if payload.is_active is not None:
+        was_active = empresa.is_active
+        empresa.is_active = payload.is_active
+        if was_active and not payload.is_active:
+            await admin_service.revoke_empresa_devices(db, empresa.id)
+    if "monthly_invoice_limit" in payload.model_fields_set:
+        empresa.monthly_invoice_limit = payload.monthly_invoice_limit
+
+    await db.commit()
+    await db.refresh(empresa)
+
+    item_data = await admin_service.build_empresa_list_item(db, empresa)
+    return AdminEmpresaDetail(**item_data, updated_at=empresa.updated_at)
 
 
 @router.post("/empresas", response_model=AdminEmpresaResponse, status_code=status.HTTP_201_CREATED)
@@ -54,7 +109,12 @@ async def create_empresa(
     admin: Annotated[PlatformAdmin, Depends(require_platform_admin)],
     db: AsyncSession = Depends(get_db_session),
 ) -> AdminEmpresaResponse:
-    empresa = Empresa(nome=payload.nome, cnpj=payload.cnpj)
+    empresa = Empresa(
+        nome=payload.nome,
+        cnpj=payload.cnpj,
+        is_active=True,
+        monthly_invoice_limit=DEFAULT_MONTHLY_INVOICE_LIMIT,
+    )
     db.add(empresa)
     await db.flush()
 
@@ -73,6 +133,8 @@ async def create_empresa(
         id=empresa.id,
         nome=empresa.nome,
         cnpj=empresa.cnpj,
+        is_active=empresa.is_active,
+        monthly_invoice_limit=empresa.monthly_invoice_limit,
         created_at=empresa.created_at,
         updated_at=empresa.updated_at,
     )
@@ -109,3 +171,35 @@ async def resend_gestor_invite(
         accepted_at=convite.accepted_at,
         created_at=convite.created_at,
     )
+
+
+@router.post(
+    "/empresas/{empresa_id}/clear-data",
+    response_model=AdminEmpresaClearDataResponse,
+)
+async def clear_empresa_data(
+    empresa_id: uuid.UUID,
+    payload: AdminEmpresaClearDataRequest,
+    admin: Annotated[PlatformAdmin, Depends(require_platform_admin)],
+    db: AsyncSession = Depends(get_db_session),
+) -> AdminEmpresaClearDataResponse:
+    try:
+        result = await admin_service.clear_empresa_data(
+            db,
+            empresa_id,
+            confirm_nome=payload.confirm_nome,
+        )
+    except EmpresaNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada")
+    except EmpresaClearDataError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+    logger.warning(
+        "admin_clear_empresa_data",
+        extra={
+            "admin_user_id": str(admin.user_id),
+            "empresa_id": str(empresa_id),
+            **result,
+        },
+    )
+    return AdminEmpresaClearDataResponse(**result)

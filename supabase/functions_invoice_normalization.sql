@@ -71,7 +71,8 @@ BEGIN
 
     UPDATE invoice_items ii
     SET category_id = assign_category_id(ii.description, ii.embedding)
-    WHERE ii.invoice_id = p_invoice_id;
+    WHERE ii.invoice_id = p_invoice_id
+      AND ii.category_id IS NULL;
 
     SELECT coalesce(sum(total_price), 0) INTO v_total
     FROM invoice_items

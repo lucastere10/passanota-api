@@ -96,6 +96,47 @@ async def download_storage_object(bucket: str, path: str) -> bytes:
     return await asyncio.to_thread(_download)
 
 
+def _list_storage_prefix_sync(bucket: str, prefix: str) -> list[str]:
+    client = get_supabase_admin()
+    storage = client.storage.from_(bucket)
+    normalized = prefix.rstrip("/")
+    paths: list[str] = []
+
+    def walk(current: str) -> None:
+        items = storage.list(current or None)
+        if not items:
+            return
+        for item in items:
+            name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+            if not name:
+                continue
+            full_path = f"{current}/{name}" if current else name
+            item_id = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
+            if item_id is None:
+                walk(full_path)
+            else:
+                paths.append(full_path)
+
+    walk(normalized)
+    return paths
+
+
+async def list_storage_prefix(bucket: str, prefix: str) -> list[str]:
+    return await asyncio.to_thread(_list_storage_prefix_sync, bucket, prefix)
+
+
+async def delete_storage_objects(bucket: str, paths: list[str]) -> int:
+    if not paths:
+        return 0
+
+    def _delete() -> int:
+        client = get_supabase_admin()
+        client.storage.from_(bucket).remove(paths)
+        return len(paths)
+
+    return await asyncio.to_thread(_delete)
+
+
 def _extract_link_properties(response: object) -> dict:
     properties = getattr(response, "properties", None)
     if properties is None and isinstance(response, dict):

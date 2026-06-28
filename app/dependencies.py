@@ -111,6 +111,7 @@ async def get_auth_context(
             Funcionario.user_id == user.id,
             Funcionario.empresa_id == empresa_id,
             Funcionario.is_active.is_(True),
+            Empresa.is_active.is_(True),
         )
     )
     row = result.one_or_none()
