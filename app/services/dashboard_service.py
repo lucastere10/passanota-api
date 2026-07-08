@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+import asyncio
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +12,9 @@ from app.models import Category, Emitter, Invoice, InvoiceItem, InvoiceStatus
 from app.schemas.dashboard import (
     BreakdownItem,
     BreakdownResponse,
+    DashboardAllResponse,
     DashboardSummaryResponse,
+    RecentInvoicesResponse,
     SpendOverTimeByCategoryPoint,
     SpendOverTimeByCategoryResponse,
     SpendOverTimeResponse,
@@ -23,9 +27,56 @@ from app.schemas.dashboard import (
 )
 from app.schemas.invoice import decimal_to_str, invoice_to_response
 from app.services.invoice_service import resolve_period
+from app.database import AsyncSessionLocal
 
 
 class DashboardService:
+    async def _run_in_session(
+        self,
+        method: Callable[..., Awaitable[object]],
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        async with AsyncSessionLocal() as db:
+            return await method(db, *args, **kwargs)
+
+    async def get_all(
+        self,
+        period: str = "30d",
+        empresa_id: uuid.UUID | None = None,
+        recent_limit: int = 8,
+    ) -> DashboardAllResponse:
+        (
+            summary,
+            spend_over_time,
+            spend_by_category_stacked,
+            top_emitters,
+            top_emitters_stacked,
+            spend_by_category,
+            top_products,
+            recent_data,
+        ) = await asyncio.gather(
+            self._run_in_session(self.summary, period, empresa_id=empresa_id),
+            self._run_in_session(self.spend_over_time, period, empresa_id=empresa_id),
+            self._run_in_session(self.spend_over_time_by_category, period, empresa_id=empresa_id),
+            self._run_in_session(self.top_emitters, period, empresa_id=empresa_id),
+            self._run_in_session(self.top_emitters_by_category, period, empresa_id=empresa_id),
+            self._run_in_session(self.spend_by_category, period, empresa_id=empresa_id),
+            self._run_in_session(self.top_products, period, empresa_id=empresa_id),
+            self._run_in_session(self.recent, recent_limit, empresa_id=empresa_id),
+        )
+
+        return DashboardAllResponse(
+            summary=summary,  # type: ignore[arg-type]
+            spend_over_time=spend_over_time,  # type: ignore[arg-type]
+            spend_by_category_stacked=spend_by_category_stacked,  # type: ignore[arg-type]
+            top_emitters=top_emitters,  # type: ignore[arg-type]
+            top_emitters_stacked=top_emitters_stacked,  # type: ignore[arg-type]
+            spend_by_category=spend_by_category,  # type: ignore[arg-type]
+            top_products=top_products,  # type: ignore[arg-type]
+            recent=RecentInvoicesResponse(data=recent_data),  # type: ignore[arg-type]
+        )
+
     def _period_filters(
         self, period_start: datetime, period_end: datetime, empresa_id: uuid.UUID | None = None
     ):

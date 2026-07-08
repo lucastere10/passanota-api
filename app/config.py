@@ -33,9 +33,11 @@ class Settings(BaseSettings):
             "SUPABASE_ANON_KEY",
         ),
     )
+    supabase_jwt_secret: str = Field(default="", validation_alias="SUPABASE_JWT_SECRET")
     supabase_storage_bucket: str = "invoice-photos"
     embeddings_enabled: bool = True
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    hf_home: str = Field(default="/tmp/hf", validation_alias="HF_HOME")
     llm_provider: str = Field(
         default="",
         validation_alias=AliasChoices("LLM_PROVIDER", "AI_PROVIDER"),
