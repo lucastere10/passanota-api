@@ -8,6 +8,7 @@ from app.dependencies import get_db_session, require_gestor_or_operador
 from app.schemas.auth import AuthContext
 from app.schemas.dashboard import (
     BreakdownResponse,
+    DashboardAllResponse,
     DashboardSummaryResponse,
     RecentInvoicesResponse,
     SpendOverTimeByCategoryResponse,
@@ -18,6 +19,14 @@ from app.schemas.dashboard import (
 from app.services.dashboard_service import dashboard_service
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("", response_model=DashboardAllResponse)
+async def dashboard_all(
+    auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
+    period: str = Query(default="30d"),
+) -> DashboardAllResponse:
+    return await dashboard_service.get_all(period, empresa_id=auth.empresa_id)
 
 
 @router.get("/summary", response_model=DashboardSummaryResponse)

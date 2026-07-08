@@ -1,5 +1,7 @@
-from contextlib import asynccontextmanager
+import asyncio
 import logging
+import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -33,18 +35,35 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _configure_hf_cache() -> None:
+    os.environ.setdefault("HF_HOME", settings.hf_home)
+    os.makedirs(settings.hf_home, exist_ok=True)
+
+
+def _warmup_embeddings() -> None:
+    from app.services.embedding_service import embedding_service
+
+    embedding_service.load_model()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _configure_logging()
+    _configure_hf_cache()
     logger.info(
-        "API started (cloud_tasks=%s, llm_provider=%s, embeddings=%s)",
+        "API started (cloud_tasks=%s, llm_provider=%s, embeddings=%s, hf_home=%s)",
         settings.cloud_tasks_enabled,
         settings.llm_provider or "not set",
         settings.embeddings_enabled,
+        settings.hf_home,
     )
+
+    if settings.embeddings_enabled:
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _warmup_embeddings)
+
     yield
     await engine.dispose()
-
 
 app = FastAPI(
     title=settings.app_name,

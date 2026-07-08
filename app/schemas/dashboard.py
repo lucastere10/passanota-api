@@ -74,3 +74,14 @@ class TopProductsResponse(BaseModel):
 
 class RecentInvoicesResponse(BaseModel):
     data: list[dict]
+
+
+class DashboardAllResponse(BaseModel):
+    summary: DashboardSummaryResponse
+    spend_over_time: SpendOverTimeResponse
+    spend_by_category_stacked: SpendOverTimeByCategoryResponse
+    top_emitters: BreakdownResponse
+    top_emitters_stacked: StackedBreakdownResponse
+    spend_by_category: BreakdownResponse
+    top_products: TopProductsResponse
+    recent: RecentInvoicesResponse

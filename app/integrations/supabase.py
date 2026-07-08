@@ -2,6 +2,8 @@ import asyncio
 from functools import lru_cache
 
 import httpx
+import jwt
+from cachetools import TTLCache
 from supabase import Client, create_client
 
 from app.config import get_settings
@@ -13,6 +15,9 @@ class SupabaseConfigError(Exception):
 
 class SupabaseAuthError(Exception):
     pass
+
+
+_token_cache: TTLCache[str, dict] = TTLCache(maxsize=512, ttl=60)
 
 
 @lru_cache
@@ -28,8 +33,29 @@ def _auth_api_key() -> str:
     return settings.supabase_secret_key or settings.supabase_publishable_key
 
 
-async def verify_access_token(token: str) -> dict:
-    """Valida JWT do usuário via Auth API (modelo atual, sem JWT secret local)."""
+def _verify_access_token_local(token: str) -> dict:
+    settings = get_settings()
+    if not settings.supabase_jwt_secret:
+        raise SupabaseConfigError("SUPABASE_JWT_SECRET is not configured")
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+    except jwt.PyJWTError as exc:
+        raise SupabaseAuthError("Invalid or expired token") from exc
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise SupabaseAuthError("Invalid token payload")
+
+    return {"id": user_id, "email": payload.get("email")}
+
+
+async def _verify_access_token_remote(token: str) -> dict:
     settings = get_settings()
     api_key = _auth_api_key()
     if not settings.supabase_url or not api_key:
@@ -49,6 +75,22 @@ async def verify_access_token(token: str) -> dict:
         raise SupabaseAuthError("Invalid or expired token")
 
     return response.json()
+
+
+async def verify_access_token(token: str) -> dict:
+    """Valida JWT localmente (com cache) ou via Auth API como fallback."""
+    cached = _token_cache.get(token)
+    if cached is not None:
+        return cached
+
+    settings = get_settings()
+    if settings.supabase_jwt_secret:
+        result = _verify_access_token_local(token)
+    else:
+        result = await _verify_access_token_remote(token)
+
+    _token_cache[token] = result
+    return result
 
 
 async def upload_storage_object(
