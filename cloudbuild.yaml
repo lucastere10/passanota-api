@@ -19,7 +19,7 @@ substitutions:
 
   # Application
   _SUPABASE_URL: https://kdmiptpxatsobroqzjnq.supabase.co
-  _FRONTEND_URL: "localhost:3000"
+  _FRONTEND_URL: "https://passanota.caldasdev.store"
   _LLM_PROVIDER: openai
   _LLM_MODEL: gpt-5.4
   _EMAIL_FROM: "Lucas Caldas <noreply@caldasdev.store>"
@@ -34,6 +34,7 @@ substitutions:
   _TASK_HANDLER_BASE_URL: "https://passanota-api-elokeq3cta-uc.a.run.app"
   _CLOUD_TASKS_SERVICE_ACCOUNT: "399951936554-compute@developer.gserviceaccount.com"
   _MIN_INSTANCES: "0"
+  _WEB_RUNTIME_SA: passanota-sa
 
 steps:
   - id: qa
@@ -117,6 +118,25 @@ steps:
       - --set-secrets
       - DATABASE_URL=${_SECRET_DATABASE_URL}:latest,SUPABASE_SECRET_KEY=${_SECRET_SUPABASE_KEY}:latest,LLM_PROVIDER_API_KEY=${_SECRET_LLM_API_KEY}:latest,RESEND_API_KEY=${_SECRET_RESEND_API_KEY}:latest
     waitFor: [push]
+
+  - id: grant-invokers
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        grant() {
+          gcloud run services add-iam-policy-binding ${_SERVICE_NAME} \
+            --region=${_DEPLOY_REGION} \
+            --project="$PROJECT_ID" \
+            --member="$$1" \
+            --role="roles/run.invoker" \
+            --quiet
+        }
+        grant "serviceAccount:${_WEB_RUNTIME_SA}@$PROJECT_ID.iam.gserviceaccount.com"
+        grant "serviceAccount:${_CLOUD_TASKS_SERVICE_ACCOUNT}"
+    waitFor: [deploy]
 
 images:
   - ${_IMAGE}:${COMMIT_SHA}
