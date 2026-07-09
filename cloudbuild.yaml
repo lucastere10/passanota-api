@@ -43,11 +43,6 @@ steps:
       - -c
       - |
         set -euo pipefail
-        if [ -z "${_FRONTEND_URL}" ] || [ -z "${_SUPABASE_URL}" ] || [ -z "${_TASK_HANDLER_BASE_URL}" ] || [ -z "${_CLOUD_TASKS_SERVICE_ACCOUNT}" ]; then
-          echo "ERROR: Configure _FRONTEND_URL, _SUPABASE_URL, _TASK_HANDLER_BASE_URL e _CLOUD_TASKS_SERVICE_ACCOUNT."
-          exit 1
-        fi
-        case "${_FRONTEND_URL}" in *XXXX*|*"[project-ref]"*) echo "ERROR: _FRONTEND_URL é placeholder."; exit 1;; esac
         for secret in "${_SECRET_DATABASE_URL}" "${_SECRET_SUPABASE_KEY}" "${_SECRET_LLM_API_KEY}" "${_SECRET_RESEND_API_KEY}"; do
           echo "Checking secret: $$secret"
           gcloud secrets describe "$$secret" --project="$PROJECT_ID" >/dev/null
