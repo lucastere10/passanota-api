@@ -2,7 +2,7 @@ substitutions:
   # Infra
   _AR_HOSTNAME: us-central1-docker.pkg.dev
   _DEPLOY_REGION: us-central1
-  _AR_REPO: passanota
+  _AR_REPO: passanota-images
   _SERVICE_NAME: passanota-api
   _RUNTIME_SA: passanota-sa
   _IMAGE: ${_AR_HOSTNAME}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}
@@ -32,7 +32,7 @@ substitutions:
   _CLOUD_TASKS_INVOICE_QUEUE: invoice-processing
   _CLOUD_TASKS_EMAIL_QUEUE: email-delivery
   _TASK_HANDLER_BASE_URL: "https://passanota-api-elokeq3cta-uc.a.run.app"
-  _CLOUD_TASKS_SERVICE_ACCOUNT: "399951936554-compute@developer.gserviceaccount.com"
+  _CLOUD_TASKS_SERVICE_ACCOUNT: "cloud-tasks-sa@caldas-projects-dev.iam.gserviceaccount.com"
   _MIN_INSTANCES: "0"
   _WEB_RUNTIME_SA: passanota-sa
 
