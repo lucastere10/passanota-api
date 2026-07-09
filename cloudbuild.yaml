@@ -2,7 +2,7 @@ substitutions:
   # Infra
   _AR_HOSTNAME: us-central1-docker.pkg.dev
   _DEPLOY_REGION: us-central1
-  _AR_REPO: passanota-images
+  _AR_REPO: passanota
   _SERVICE_NAME: passanota-api
   _RUNTIME_SA: passanota-sa
   _IMAGE: ${_AR_HOSTNAME}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}
