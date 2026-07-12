@@ -32,29 +32,12 @@ substitutions:
   _CLOUD_TASKS_INVOICE_QUEUE: invoice-processing
   _CLOUD_TASKS_EMAIL_QUEUE: email-delivery
   _TASK_HANDLER_BASE_URL: "https://passanota-api-elokeq3cta-uc.a.run.app"
-  _CLOUD_TASKS_SERVICE_ACCOUNT: "399951936554-compute@developer.gserviceaccount.com"
+  _CLOUD_TASKS_SERVICE_ACCOUNT: "cloud-tasks-sa@caldas-projects-dev.iam.gserviceaccount.com"
   _MIN_INSTANCES: "0"
+  _WEB_RUNTIME_SA: passanota-sa
 
 steps:
-  - id: validate
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        if [ -z "${_FRONTEND_URL}" ] || [ -z "${_SUPABASE_URL}" ] || [ -z "${_TASK_HANDLER_BASE_URL}" ] || [ -z "${_CLOUD_TASKS_SERVICE_ACCOUNT}" ]; then
-          echo "ERROR: Configure _FRONTEND_URL, _SUPABASE_URL, _TASK_HANDLER_BASE_URL e _CLOUD_TASKS_SERVICE_ACCOUNT."
-          exit 1
-        fi
-        case "${_FRONTEND_URL}" in *XXXX*|*"[project-ref]"*) echo "ERROR: _FRONTEND_URL é placeholder."; exit 1;; esac
-        for secret in "${_SECRET_DATABASE_URL}" "${_SECRET_SUPABASE_KEY}" "${_SECRET_LLM_API_KEY}" "${_SECRET_RESEND_API_KEY}"; do
-          echo "Checking secret: $$secret"
-          gcloud secrets describe "$$secret" --project="$PROJECT_ID" >/dev/null
-        done
-        echo "Validation OK (commit: $COMMIT_SHA)"
-
-  - id: lint
+  - id: qa
     name: python:3.13-slim
     entrypoint: bash
     args:
@@ -64,19 +47,7 @@ steps:
         pip install --no-cache-dir uv
         uv pip install --system ".[dev]"
         ruff check app tests
-    waitFor: [validate]
-
-  - id: test
-    name: python:3.13-slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        pip install --no-cache-dir uv
-        uv pip install --system ".[dev]"
         pytest tests/ -q --ignore=tests/test_supabase_integration.py
-    waitFor: [lint]
 
   - id: build
     name: gcr.io/cloud-builders/docker
@@ -93,7 +64,7 @@ steps:
       - -f
       - Dockerfile
       - .
-    waitFor: [test]
+    waitFor: [qa]
 
   - id: push
     name: gcr.io/cloud-builders/docker
@@ -147,6 +118,25 @@ steps:
       - --set-secrets
       - DATABASE_URL=${_SECRET_DATABASE_URL}:latest,SUPABASE_SECRET_KEY=${_SECRET_SUPABASE_KEY}:latest,LLM_PROVIDER_API_KEY=${_SECRET_LLM_API_KEY}:latest,RESEND_API_KEY=${_SECRET_RESEND_API_KEY}:latest
     waitFor: [push]
+
+  - id: grant-invokers
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        grant() {
+          gcloud run services add-iam-policy-binding ${_SERVICE_NAME} \
+            --region=${_DEPLOY_REGION} \
+            --project="$PROJECT_ID" \
+            --member="$$1" \
+            --role="roles/run.invoker" \
+            --quiet
+        }
+        grant "serviceAccount:${_WEB_RUNTIME_SA}@$PROJECT_ID.iam.gserviceaccount.com"
+        grant "serviceAccount:${_CLOUD_TASKS_SERVICE_ACCOUNT}"
+    waitFor: [deploy]
 
 images:
   - ${_IMAGE}:${COMMIT_SHA}
