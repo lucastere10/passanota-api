@@ -19,10 +19,10 @@ substitutions:
 
   # Application
   _SUPABASE_URL: https://kdmiptpxatsobroqzjnq.supabase.co
-  _FRONTEND_URL: "localhost:3000"
+  _FRONTEND_URL: "https://passanota.caldasdev.com.br"
   _LLM_PROVIDER: openai
   _LLM_MODEL: gpt-5.4
-  _EMAIL_FROM: "Lucas Caldas <noreply@caldasdev.store>"
+  _EMAIL_FROM: "Lucas Caldas <noreply@caldasdev.com.br>"
   _PLATFORM_ADMIN_EMAIL: "lucastere10@gmail.com"
   _PLATFORM_ADMIN_NOTIFY_EMAIL: "lucastere10@gmail.com"
 
