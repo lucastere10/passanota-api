@@ -23,9 +23,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       torch --index-url https://download.pytorch.org/whl/cpu
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv export --frozen --no-emit-project --no-dev -o /tmp/requirements.txt \
-    && grep -v '^torch==' /tmp/requirements.txt > /tmp/requirements-no-torch.txt \
-    && uv pip install --system --no-cache --prefix=/install -r /tmp/requirements-no-torch.txt
+    uv export --frozen --no-emit-project --no-dev --no-emit-package torch --no-annotate \
+      -o /tmp/requirements.txt \
+    && uv pip install --system --no-cache --prefix=/install -r /tmp/requirements.txt
 
 # App layer: invalida a cada mudança de código
 COPY app ./app
