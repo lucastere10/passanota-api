@@ -27,10 +27,38 @@ class BreakdownItem(BaseModel):
     amount: str
     percentage: float
     count: int
+    slug: str | None = None
 
 
 class BreakdownResponse(BaseModel):
     items: list[BreakdownItem]
+
+
+class StackedSegment(BaseModel):
+    label: str
+    slug: str | None = None
+    amount: str
+
+
+class StackedBreakdownItem(BaseModel):
+    label: str
+    total: str
+    segments: list[StackedSegment]
+
+
+class StackedBreakdownResponse(BaseModel):
+    items: list[StackedBreakdownItem]
+    categories: list[str]
+
+
+class SpendOverTimeByCategoryPoint(BaseModel):
+    date: str
+    segments: list[StackedSegment]
+
+
+class SpendOverTimeByCategoryResponse(BaseModel):
+    points: list[SpendOverTimeByCategoryPoint]
+    categories: list[str]
 
 
 class TopProductItem(BaseModel):
@@ -46,3 +74,14 @@ class TopProductsResponse(BaseModel):
 
 class RecentInvoicesResponse(BaseModel):
     data: list[dict]
+
+
+class DashboardAllResponse(BaseModel):
+    summary: DashboardSummaryResponse
+    spend_over_time: SpendOverTimeResponse
+    spend_by_category_stacked: SpendOverTimeByCategoryResponse
+    top_emitters: BreakdownResponse
+    top_emitters_stacked: StackedBreakdownResponse
+    spend_by_category: BreakdownResponse
+    top_products: TopProductsResponse
+    recent: RecentInvoicesResponse

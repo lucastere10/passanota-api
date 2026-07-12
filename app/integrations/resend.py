@@ -7,18 +7,26 @@ class ResendError(Exception):
     pass
 
 
-async def send_email(*, to: str | list[str], subject: str, html: str) -> None:
+async def send_email(
+    *,
+    to: str | list[str],
+    subject: str,
+    html: str,
+    text: str | None = None,
+) -> None:
     settings = get_settings()
     if not settings.resend_api_key:
         raise ResendError("RESEND_API_KEY is not configured")
 
     recipients = [to] if isinstance(to, str) else to
-    payload = {
+    payload: dict[str, object] = {
         "from": settings.email_from,
         "to": recipients,
         "subject": subject,
         "html": html,
     }
+    if text is not None:
+        payload["text"] = text
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(

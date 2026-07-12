@@ -2,6 +2,8 @@ import asyncio
 from functools import lru_cache
 
 import httpx
+import jwt
+from cachetools import TTLCache
 from supabase import Client, create_client
 
 from app.config import get_settings
@@ -13,6 +15,9 @@ class SupabaseConfigError(Exception):
 
 class SupabaseAuthError(Exception):
     pass
+
+
+_token_cache: TTLCache[str, dict] = TTLCache(maxsize=512, ttl=60)
 
 
 @lru_cache
@@ -28,8 +33,29 @@ def _auth_api_key() -> str:
     return settings.supabase_secret_key or settings.supabase_publishable_key
 
 
-async def verify_access_token(token: str) -> dict:
-    """Valida JWT do usuário via Auth API (modelo atual, sem JWT secret local)."""
+def _verify_access_token_local(token: str) -> dict:
+    settings = get_settings()
+    if not settings.supabase_jwt_secret:
+        raise SupabaseConfigError("SUPABASE_JWT_SECRET is not configured")
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+    except jwt.PyJWTError as exc:
+        raise SupabaseAuthError("Invalid or expired token") from exc
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise SupabaseAuthError("Invalid token payload")
+
+    return {"id": user_id, "email": payload.get("email")}
+
+
+async def _verify_access_token_remote(token: str) -> dict:
     settings = get_settings()
     api_key = _auth_api_key()
     if not settings.supabase_url or not api_key:
@@ -49,6 +75,22 @@ async def verify_access_token(token: str) -> dict:
         raise SupabaseAuthError("Invalid or expired token")
 
     return response.json()
+
+
+async def verify_access_token(token: str) -> dict:
+    """Valida JWT localmente (com cache) ou via Auth API como fallback."""
+    cached = _token_cache.get(token)
+    if cached is not None:
+        return cached
+
+    settings = get_settings()
+    if settings.supabase_jwt_secret:
+        result = _verify_access_token_local(token)
+    else:
+        result = await _verify_access_token_remote(token)
+
+    _token_cache[token] = result
+    return result
 
 
 async def upload_storage_object(
@@ -94,6 +136,47 @@ async def download_storage_object(bucket: str, path: str) -> bytes:
         return client.storage.from_(bucket).download(path)
 
     return await asyncio.to_thread(_download)
+
+
+def _list_storage_prefix_sync(bucket: str, prefix: str) -> list[str]:
+    client = get_supabase_admin()
+    storage = client.storage.from_(bucket)
+    normalized = prefix.rstrip("/")
+    paths: list[str] = []
+
+    def walk(current: str) -> None:
+        items = storage.list(current or None)
+        if not items:
+            return
+        for item in items:
+            name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+            if not name:
+                continue
+            full_path = f"{current}/{name}" if current else name
+            item_id = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
+            if item_id is None:
+                walk(full_path)
+            else:
+                paths.append(full_path)
+
+    walk(normalized)
+    return paths
+
+
+async def list_storage_prefix(bucket: str, prefix: str) -> list[str]:
+    return await asyncio.to_thread(_list_storage_prefix_sync, bucket, prefix)
+
+
+async def delete_storage_objects(bucket: str, paths: list[str]) -> int:
+    if not paths:
+        return 0
+
+    def _delete() -> int:
+        client = get_supabase_admin()
+        client.storage.from_(bucket).remove(paths)
+        return len(paths)
+
+    return await asyncio.to_thread(_delete)
 
 
 def _extract_link_properties(response: object) -> dict:

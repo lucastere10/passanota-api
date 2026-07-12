@@ -1,48 +1,43 @@
 substitutions:
-  _REGION: us-central1
-  _AR_REPOSITORY: passanota-images
-  _IMAGE_NAME: passanota-api
+  # Infra
+  _AR_HOSTNAME: us-central1-docker.pkg.dev
+  _DEPLOY_REGION: us-central1
+  _AR_REPO: passanota-images
   _SERVICE_NAME: passanota-api
-  _TAG: latest
-  _FRONTEND_URL: ""
-  _SUPABASE_URL: ""
+  _RUNTIME_SA: passanota-sa
+  _IMAGE: ${_AR_HOSTNAME}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}
+  _CONCURRENCY: "20"
+  _LABEL_APP: passanota
+  _LABEL_ENV: production
+  _LABEL_OWNER: lucas
+
+  # Secrets
+  _SECRET_DATABASE_URL: passanota-database-url
+  _SECRET_SUPABASE_KEY: passanota-supabase-secret-key
+  _SECRET_LLM_API_KEY: passanota-openai-api-key
+  _SECRET_RESEND_API_KEY: passanota-resend-api-key
+
+  # Application
+  _SUPABASE_URL: https://kdmiptpxatsobroqzjnq.supabase.co
+  _FRONTEND_URL: "https://passanota.caldasdev.store"
   _LLM_PROVIDER: openai
-  _LLM_MODEL: gpt-4o
-  _EMAIL_FROM: noreply@passanota.com
-  _PLATFORM_ADMIN_EMAIL: ""
-  _PLATFORM_ADMIN_NOTIFY_EMAIL: ""
+  _LLM_MODEL: gpt-5.4
+  _EMAIL_FROM: "Lucas Caldas <noreply@caldasdev.store>"
+  _PLATFORM_ADMIN_EMAIL: "lucastere10@gmail.com"
+  _PLATFORM_ADMIN_NOTIFY_EMAIL: "lucastere10@gmail.com"
+
+  # Cloud Tasks
   _CLOUD_TASKS_ENABLED: "true"
   _GCP_LOCATION: us-central1
   _CLOUD_TASKS_INVOICE_QUEUE: invoice-processing
   _CLOUD_TASKS_EMAIL_QUEUE: email-delivery
-  _TASK_HANDLER_BASE_URL: ""
-  _CLOUD_TASKS_SERVICE_ACCOUNT: ""
+  _TASK_HANDLER_BASE_URL: "https://passanota-api-elokeq3cta-uc.a.run.app"
+  _CLOUD_TASKS_SERVICE_ACCOUNT: "cloud-tasks-sa@caldas-projects-dev.iam.gserviceaccount.com"
   _MIN_INSTANCES: "0"
-  _SECRET_DATABASE_URL: PASSANOTA_DATABASE_URL
-  _SECRET_SUPABASE_KEY: PASSANOTA_SUPABASE_SECRET_KEY
-  _SECRET_LLM_API_KEY: PASSANOTA_OPENAI_API_KEY
-  _SECRET_RESEND_API_KEY: RESEND_API_KEY
+  _WEB_RUNTIME_SA: passanota-sa
 
 steps:
-  - id: validate
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        if [ -z "${_FRONTEND_URL}" ] || [ -z "${_SUPABASE_URL}" ] || [ -z "${_TASK_HANDLER_BASE_URL}" ] || [ -z "${_CLOUD_TASKS_SERVICE_ACCOUNT}" ]; then
-          echo "ERROR: Configure _FRONTEND_URL, _SUPABASE_URL, _TASK_HANDLER_BASE_URL e _CLOUD_TASKS_SERVICE_ACCOUNT."
-          exit 1
-        fi
-        case "${_FRONTEND_URL}" in *XXXX*|*"[project-ref]"*) echo "ERROR: _FRONTEND_URL é placeholder."; exit 1;; esac
-        for secret in "${_SECRET_DATABASE_URL}" "${_SECRET_SUPABASE_KEY}" "${_SECRET_LLM_API_KEY}" "${_SECRET_RESEND_API_KEY}"; do
-          echo "Checking secret: $$secret"
-          gcloud secrets describe "$$secret" --project="$PROJECT_ID" >/dev/null
-        done
-        echo "Validation OK (commit: $COMMIT_SHA)"
-
-  - id: lint
+  - id: qa
     name: python:3.13-slim
     entrypoint: bash
     args:
@@ -52,39 +47,31 @@ steps:
         pip install --no-cache-dir uv
         uv pip install --system ".[dev]"
         ruff check app tests
-    waitFor: [validate]
-
-  - id: test
-    name: python:3.13-slim
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        pip install --no-cache-dir uv
-        uv pip install --system ".[dev]"
         pytest tests/ -q --ignore=tests/test_supabase_integration.py
-    waitFor: [lint]
 
   - id: build
     name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
     args:
       - build
+      - --cache-from
+      - ${_IMAGE}:latest
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+      - ${_IMAGE}:${COMMIT_SHA}
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:latest
+      - ${_IMAGE}:latest
       - -f
       - Dockerfile
       - .
-    waitFor: [test]
+    waitFor: [qa]
 
   - id: push
     name: gcr.io/cloud-builders/docker
     args:
       - push
       - --all-tags
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}
+      - ${_IMAGE}
     waitFor: [build]
 
   - id: deploy
@@ -95,9 +82,9 @@ steps:
       - deploy
       - ${_SERVICE_NAME}
       - --image
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+      - ${_IMAGE}:${COMMIT_SHA}
       - --region
-      - ${_REGION}
+      - ${_DEPLOY_REGION}
       - --platform
       - managed
       - --no-allow-unauthenticated
@@ -109,8 +96,17 @@ steps:
       - "2"
       - --timeout
       - "300"
+      - --cpu-boost
       - --concurrency
-      - "20"
+      - ${_CONCURRENCY}
+      - --revision-suffix
+      - ${SHORT_SHA}
+      - --labels
+      - app=${_LABEL_APP},env=${_LABEL_ENV},owner=${_LABEL_OWNER}
+      - --execution-environment
+      - gen2
+      - --service-account
+      - ${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com
       - --min-instances
       - ${_MIN_INSTANCES}
       - --max-instances
@@ -123,9 +119,31 @@ steps:
       - DATABASE_URL=${_SECRET_DATABASE_URL}:latest,SUPABASE_SECRET_KEY=${_SECRET_SUPABASE_KEY}:latest,LLM_PROVIDER_API_KEY=${_SECRET_LLM_API_KEY}:latest,RESEND_API_KEY=${_SECRET_RESEND_API_KEY}:latest
     waitFor: [push]
 
+  - id: grant-invokers
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        grant() {
+          gcloud run services add-iam-policy-binding ${_SERVICE_NAME} \
+            --region=${_DEPLOY_REGION} \
+            --project="$PROJECT_ID" \
+            --member="$$1" \
+            --role="roles/run.invoker" \
+            --quiet
+        }
+        grant "serviceAccount:${_WEB_RUNTIME_SA}@$PROJECT_ID.iam.gserviceaccount.com"
+        grant "serviceAccount:${_CLOUD_TASKS_SERVICE_ACCOUNT}"
+    waitFor: [deploy]
+
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:latest
+  - ${_IMAGE}:${COMMIT_SHA}
+  - ${_IMAGE}:latest
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+serviceAccount: projects/${PROJECT_ID}/serviceAccounts/cloud-build-sa@${PROJECT_ID}.iam.gserviceaccount.com

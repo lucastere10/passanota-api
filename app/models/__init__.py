@@ -49,6 +49,8 @@ class Empresa(Base):
     nome: Mapped[str] = mapped_column(String(255), nullable=False)
     cnpj: Mapped[str | None] = mapped_column(String(14), unique=True, nullable=True, index=True)
     pin: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    monthly_invoice_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -252,6 +254,7 @@ class Invoice(Base):
     photo_processed_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_raw_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     ai_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ai_confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

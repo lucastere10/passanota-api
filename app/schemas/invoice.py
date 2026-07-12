@@ -33,6 +33,8 @@ class InvoiceItemResponse(BaseModel):
     unit_price: str | None = None
     total_price: str | None = None
     category_id: UUID | None = None
+    category_name: str | None = None
+    category_slug: str | None = None
 
 
 class InvoiceResponse(BaseModel):
@@ -54,6 +56,7 @@ class InvoiceResponse(BaseModel):
     photo_original_path: str | None = None
     photo_processed_path: str | None = None
     ai_model: str | None = None
+    ai_confidence: str | None = None
     extracted_at: datetime | None = None
     status: InvoiceStatus
     error_message: str | None = None
@@ -73,6 +76,10 @@ class CaptureInvoiceResponse(BaseModel):
     processed_image_url: str | None = None
     preprocess_skipped: bool = False
     extraction_summary: ExtractionSummary
+    processing_note: str = (
+        "Nota recebida. O processamento com IA roda em segundo plano — "
+        "acompanhe o status pela lista de notas ou pelo ID retornado."
+    )
 
 
 class PaginatedInvoicesResponse(BaseModel):
@@ -82,29 +89,56 @@ class PaginatedInvoicesResponse(BaseModel):
     page_size: int
 
 
+class UpdateInvoiceRequest(BaseModel):
+    issued_at: datetime | None = None
+    total_amount: str | None = None
+    discount_amount: str | None = None
+    emitter_name: str | None = None
+
+
+class UpdateInvoiceItemRequest(BaseModel):
+    description: str | None = None
+    quantity: str | None = None
+    unit_price: str | None = None
+    total_price: str | None = None
+    unit: str | None = None
+    category_id: UUID | None = None
+
+
+def str_to_decimal(value: str | None) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(value)
+
+
 def decimal_to_str(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return format(value, "f")
 
 
+def invoice_item_to_response(item) -> InvoiceItemResponse:
+    category_name = item.category.name if item.category else None
+    category_slug = item.category.slug if item.category else None
+    return InvoiceItemResponse(
+        id=item.id,
+        line_number=item.line_number,
+        product_code=item.product_code,
+        description=item.description,
+        ncm=item.ncm,
+        ean=item.ean,
+        quantity=decimal_to_str(item.quantity),
+        unit=item.unit,
+        unit_price=decimal_to_str(item.unit_price),
+        total_price=decimal_to_str(item.total_price),
+        category_id=item.category_id,
+        category_name=category_name,
+        category_slug=category_slug,
+    )
+
+
 def invoice_to_response(invoice) -> InvoiceResponse:
-    items = [
-        InvoiceItemResponse(
-            id=item.id,
-            line_number=item.line_number,
-            product_code=item.product_code,
-            description=item.description,
-            ncm=item.ncm,
-            ean=item.ean,
-            quantity=decimal_to_str(item.quantity),
-            unit=item.unit,
-            unit_price=decimal_to_str(item.unit_price),
-            total_price=decimal_to_str(item.total_price),
-            category_id=item.category_id,
-        )
-        for item in invoice.items
-    ]
+    items = [invoice_item_to_response(item) for item in invoice.items]
 
     emitter = None
     if invoice.emitter:
@@ -127,6 +161,7 @@ def invoice_to_response(invoice) -> InvoiceResponse:
         photo_original_path=invoice.photo_original_path,
         photo_processed_path=invoice.photo_processed_path,
         ai_model=invoice.ai_model,
+        ai_confidence=decimal_to_str(invoice.ai_confidence),
         extracted_at=invoice.extracted_at,
         status=invoice.status,
         error_message=invoice.error_message,

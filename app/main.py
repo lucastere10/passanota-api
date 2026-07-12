@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,9 +10,20 @@ from starlette.responses import Response
 
 from app.config import get_settings
 from app.database import engine
-from app.routers import admin, auth, dashboard, devices, empresas, health, internal_tasks, invoices, public, search
+from app.routers import admin, auth, categories, dashboard, devices, empresas, health, internal_tasks, invoices, public, search
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+def _configure_logging() -> None:
+    level = logging.DEBUG if settings.debug else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)s %(name)s: %(message)s",
+        force=True,
+    )
+    logging.getLogger("app").setLevel(level)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -21,13 +35,35 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _configure_hf_cache() -> None:
+    os.environ.setdefault("HF_HOME", settings.hf_home)
+    os.makedirs(settings.hf_home, exist_ok=True)
+
+
+def _warmup_embeddings() -> None:
+    from app.services.embedding_service import embedding_service
+
+    embedding_service.load_model()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Embeddings carregam sob demanda (primeira busca semântica) para não
-    # bloquear o bind do servidor — o download do modelo excede a startup probe.
+    _configure_logging()
+    _configure_hf_cache()
+    logger.info(
+        "API started (cloud_tasks=%s, llm_provider=%s, embeddings=%s, hf_home=%s)",
+        settings.cloud_tasks_enabled,
+        settings.llm_provider or "not set",
+        settings.embeddings_enabled,
+        settings.hf_home,
+    )
+
+    if settings.embeddings_enabled:
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _warmup_embeddings)
+
     yield
     await engine.dispose()
-
 
 app = FastAPI(
     title=settings.app_name,
@@ -47,6 +83,7 @@ app.include_router(admin.router, prefix="/v1")
 app.include_router(empresas.router, prefix="/v1")
 app.include_router(devices.router, prefix="/v1")
 app.include_router(invoices.router, prefix="/v1")
+app.include_router(categories.router, prefix="/v1")
 app.include_router(dashboard.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(internal_tasks.router)

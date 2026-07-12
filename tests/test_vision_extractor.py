@@ -1,7 +1,12 @@
 
 import pytest
 
-from app.services.vision import VisionExtractorError, _normalize_payload, _parse_json_response
+from app.services.vision import (
+    VisionExtractorError,
+    _normalize_payload,
+    _openai_token_limit_param,
+    _parse_json_response,
+)
 
 
 def test_parse_json_response_plain():
@@ -26,3 +31,21 @@ def test_normalize_payload_aliases():
     normalized = _normalize_payload(payload)
     assert normalized["fornecedor"] == "Loja"
     assert "itens" in normalized
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_key"),
+    [
+        ("gpt-4o", "max_tokens"),
+        ("gpt-4o-mini", "max_tokens"),
+        ("gpt-5.4", "max_completion_tokens"),
+        ("gpt-5", "max_completion_tokens"),
+        ("o1-preview", "max_completion_tokens"),
+        ("o3-mini", "max_completion_tokens"),
+    ],
+)
+def test_openai_token_limit_param(model: str, expected_key: str):
+    params = _openai_token_limit_param(model, 4096)
+    assert expected_key in params
+    assert params[expected_key] == 4096
+    assert len(params) == 1

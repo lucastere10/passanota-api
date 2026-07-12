@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM python:3.13-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
@@ -13,18 +15,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir uv
 
+# Deps layer: só invalida quando pyproject.toml / uv.lock mudam
 COPY pyproject.toml uv.lock README.md ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --no-cache --prefix=/install \
+      torch --index-url https://download.pytorch.org/whl/cpu
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --frozen --no-emit-project --no-dev --no-emit-package torch --no-annotate \
+      -o /tmp/requirements.txt \
+    && uv pip install --system --no-cache --prefix=/install -r /tmp/requirements.txt
+
+# App layer: invalida a cada mudança de código
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 
-RUN uv pip install --system --no-cache --prefix=/install .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --no-cache --prefix=/install --no-deps .
 
 FROM python:3.13-slim AS runner
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
+    HF_HOME=/tmp/hf \
     PATH="/install/bin:${PATH}" \
     PYTHONPATH="/install/lib/python3.13/site-packages"
 
@@ -36,7 +52,8 @@ COPY alembic ./alembic
 COPY alembic.ini ./
 
 RUN useradd --create-home --uid 1001 appuser \
-    && chown -R appuser:appuser /app
+    && mkdir -p /tmp/hf \
+    && chown -R appuser:appuser /app /tmp/hf
 
 USER appuser
 

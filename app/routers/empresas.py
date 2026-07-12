@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db_session, require_gestor
 from app.models import ConviteRole, Empresa, Funcionario
+from app.schemas.admin import EmpresaUsageResponse
 from app.schemas.auth import AuthContext, AuthUser
 from app.schemas.auth_api import EmpresaMembership
 from app.schemas.device import EmpresaPinStatusResponse, EmpresaPinUpdateRequest
@@ -17,6 +18,7 @@ from app.schemas.invite import (
     OperadorInviteRequest,
 )
 from app.schemas.tasks import SendEmailTask
+from app.services.admin_service import admin_service
 from app.services.device_service import device_service
 from app.services.invite_service import invite_service
 from app.services.task_dispatcher import dispatch_email_task
@@ -32,7 +34,11 @@ async def list_my_empresas(
     result = await db.execute(
         select(Funcionario, Empresa)
         .join(Empresa, Empresa.id == Funcionario.empresa_id)
-        .where(Funcionario.user_id == user.id, Funcionario.is_active.is_(True))
+        .where(
+            Funcionario.user_id == user.id,
+            Funcionario.is_active.is_(True),
+            Empresa.is_active.is_(True),
+        )
     )
     return [
         EmpresaMembership(
@@ -44,6 +50,25 @@ async def list_my_empresas(
         )
         for funcionario, empresa in result.all()
     ]
+
+
+@router.get("/{empresa_id}/usage", response_model=EmpresaUsageResponse)
+async def get_empresa_usage(
+    empresa_id: uuid.UUID,
+    auth: Annotated[AuthContext, Depends(require_gestor)],
+    db: AsyncSession = Depends(get_db_session),
+) -> EmpresaUsageResponse:
+    if auth.empresa_id != empresa_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Empresa não autorizada")
+
+    usage = await admin_service.get_empresa_usage(db, auth.empresa)
+    return EmpresaUsageResponse(
+        invoices_total=usage["invoices_total"],
+        invoices_this_month=usage["invoices_this_month"],
+        monthly_invoice_limit=usage["monthly_invoice_limit"],
+        is_unlimited=usage["is_unlimited"],
+        usage_percentage=usage["usage_percentage"],
+    )
 
 
 @router.post("/{empresa_id}/convites", response_model=InviteResponse)
