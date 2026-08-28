@@ -16,7 +16,7 @@ def test_preserve_existing_asyncpg():
     assert normalize_database_url(url) == url
 
 
-def test_app_role_http_uses_remote_encode():
+def test_app_role_http_disallows_inline_ml():
     settings = Settings(
         database_url="postgresql://user:pass@host:5432/db",
         app_role="http",
@@ -24,7 +24,6 @@ def test_app_role_http_uses_remote_encode():
     )
     assert settings.is_http_process is True
     assert settings.allows_inline_ml is False
-    assert settings.uses_remote_encode is True
 
 
 def test_app_role_all_allows_inline_ml():
@@ -34,4 +33,5 @@ def test_app_role_all_allows_inline_ml():
         _env_file=None,
     )
     assert settings.allows_inline_ml is True
-    assert settings.uses_remote_encode is False
+    assert settings.embedding_model == "text-embedding-3-small"
+    assert settings.embedding_dimensions == 512

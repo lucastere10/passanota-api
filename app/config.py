@@ -46,8 +46,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_ROLE", "app_role"),
     )
     embeddings_enabled: bool = True
-    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-    hf_home: str = Field(default="/tmp/hf", validation_alias="HF_HOME")
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 512
     llm_provider: str = Field(
         default="",
         validation_alias=AliasChoices("LLM_PROVIDER", "AI_PROVIDER"),
@@ -88,10 +88,6 @@ class Settings(BaseSettings):
     @property
     def allows_inline_ml(self) -> bool:
         return self.app_role != "http"
-
-    @property
-    def uses_remote_encode(self) -> bool:
-        return self.app_role == "http"
 
     @field_validator("database_url", mode="before")
     @classmethod

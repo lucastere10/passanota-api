@@ -1,5 +1,4 @@
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -34,19 +33,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def _configure_hf_cache() -> None:
-    os.environ.setdefault("HF_HOME", settings.hf_home)
-    os.makedirs(settings.hf_home, exist_ok=True)
-
-
-def _warmup_embeddings() -> None:
-    from app.services.embedding_service import embedding_service
-
-    embedding_service.load_model()
-
-
 def mount_routers(application: FastAPI, role: str | None = None) -> None:
-    """Attach routers for the process role without importing ML on HTTP."""
+    """Attach routers for the process role without importing OpenCV on HTTP."""
     process_role = role or settings.app_role
     application.include_router(health.router)
 
@@ -65,28 +53,19 @@ def mount_routers(application: FastAPI, role: str | None = None) -> None:
         from app.routers import internal_tasks
 
         application.include_router(internal_tasks.router)
-        application.include_router(internal_tasks.encode_router)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _configure_logging()
-    if settings.app_role != "http":
-        _configure_hf_cache()
     logger.info(
-        "API started (role=%s, cloud_tasks=%s, llm_provider=%s, embeddings=%s, hf_home=%s)",
+        "API started (role=%s, cloud_tasks=%s, llm_provider=%s, embeddings=%s, embedding_model=%s)",
         settings.app_role,
         settings.cloud_tasks_enabled,
         settings.llm_provider or "not set",
         settings.embeddings_enabled,
-        settings.hf_home,
+        settings.embedding_model,
     )
-
-    if settings.app_role == "worker" and settings.embeddings_enabled:
-        import asyncio
-
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, _warmup_embeddings)
 
     yield
     await engine.dispose()

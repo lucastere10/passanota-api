@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -10,10 +11,12 @@ from app.config import get_settings
 from app.models import Category, Emitter, Invoice, InvoiceItem, InvoiceSource, InvoiceStatus
 from app.schemas.extraction import ExtractedInvoice
 from app.schemas.invoice import InvoiceStatusItem, str_to_decimal
+from app.services.encode_client import EncodeClientError, encode_texts
 from app.services.image.storage import StorageError, invoice_photo_storage
 from app.services.task_dispatcher import dispatch_invoice_processing
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _invoice_load_options():
@@ -174,8 +177,6 @@ class InvoiceService:
         invoice: Invoice,
         extracted: ExtractedInvoice,
     ) -> None:
-        import asyncio
-
         if extracted.fornecedor:
             emitter = await self._get_or_create_emitter(
                 db, extracted.fornecedor, cnpj=extracted.cnpj
@@ -194,11 +195,15 @@ class InvoiceService:
         unmapped_count = 0
 
         descriptions = [item.descricao for item in extracted.itens]
-        embeddings = (
-            await asyncio.to_thread(self._encode_descriptions, descriptions)
-            if descriptions
-            else []
-        )
+        embeddings: list[list[float]] = []
+        if descriptions:
+            try:
+                embeddings = await encode_texts(descriptions)
+            except EncodeClientError:
+                logger.exception(
+                    "Invoice %s: embeddings skipped; items saved without vectors",
+                    invoice.id,
+                )
 
         for idx, item in enumerate(extracted.itens):
             embedding = embeddings[idx] if idx < len(embeddings) else None
@@ -260,12 +265,6 @@ class InvoiceService:
                 confidence -= 0.10
 
         return max(0.0, min(1.0, round(confidence, 2)))
-
-    @staticmethod
-    def _encode_descriptions(descriptions: list[str]) -> list[list[float]]:
-        from app.services.embedding_service import embedding_service
-
-        return embedding_service.encode(descriptions)
 
     async def _load_category_slug_map(self, db: AsyncSession) -> dict[str, uuid.UUID]:
         result = await db.execute(select(Category.slug, Category.id))
