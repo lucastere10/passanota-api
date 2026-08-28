@@ -7,7 +7,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import AsyncSessionLocal, get_db
 from app.integrations.supabase import SupabaseAuthError, SupabaseConfigError, verify_access_token
 from app.models import Empresa, Funcionario, FuncionarioRole, PlatformAdmin
 from app.schemas.auth import AuthContext, AuthUser, CaptureContext, DeviceContext
@@ -70,10 +70,10 @@ async def get_current_user(
 
 async def get_platform_admin(
     user: Annotated[AuthUser, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlatformAdmin:
-    result = await db.execute(select(PlatformAdmin).where(PlatformAdmin.user_id == user.id))
-    admin = result.scalar_one_or_none()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(PlatformAdmin).where(PlatformAdmin.user_id == user.id))
+        admin = result.scalar_one_or_none()
     if admin is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -85,10 +85,10 @@ async def get_platform_admin(
 require_platform_admin = get_platform_admin
 
 
-async def get_auth_context(
-    user: Annotated[AuthUser, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    x_empresa_id: str | None = Header(default=None, alias="X-Empresa-Id"),
+async def _resolve_auth_context(
+    db: AsyncSession,
+    user: AuthUser,
+    x_empresa_id: str | None,
 ) -> AuthContext:
     if not x_empresa_id:
         raise HTTPException(
@@ -123,6 +123,14 @@ async def get_auth_context(
 
     funcionario, empresa = row
     return AuthContext(user=user, funcionario=funcionario, empresa=empresa)
+
+
+async def get_auth_context(
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    x_empresa_id: str | None = Header(default=None, alias="X-Empresa-Id"),
+) -> AuthContext:
+    async with AsyncSessionLocal() as db:
+        return await _resolve_auth_context(db, user, x_empresa_id)
 
 
 def require_roles(*roles: FuncionarioRole) -> Callable[..., AuthContext]:
@@ -171,33 +179,33 @@ async def get_capture_context(
     x_supabase_authorization: str | None = Header(default=None, alias="X-Supabase-Authorization"),
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
     x_empresa_id: str | None = Header(default=None, alias="X-Empresa-Id"),
-    db: AsyncSession = Depends(get_db),
 ) -> CaptureContext:
-    if x_device_token:
-        row = await device_service.get_device_by_token(db, x_device_token.strip())
-        if row is None:
+    async with AsyncSessionLocal() as db:
+        if x_device_token:
+            row = await device_service.get_device_by_token(db, x_device_token.strip())
+            if row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or revoked device token",
+                )
+            device, empresa = row
+            return CaptureContext(empresa_id=empresa.id, device_id=device.id)
+
+        auth_header = resolve_supabase_authorization(authorization, x_supabase_authorization)
+        if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or revoked device token",
+                detail="Missing authentication",
             )
-        device, empresa = row
-        return CaptureContext(empresa_id=empresa.id, device_id=device.id)
 
-    auth_header = resolve_supabase_authorization(authorization, x_supabase_authorization)
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication",
-        )
-
-    user = await get_current_user(authorization, x_supabase_authorization)
-    auth = await get_auth_context(user, db, x_empresa_id)
-    if auth.role not in (FuncionarioRole.GESTOR, FuncionarioRole.OPERADOR):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient permissions for this action",
-        )
-    return CaptureContext(empresa_id=auth.empresa_id, device_id=None)
+        user = await get_current_user(authorization, x_supabase_authorization)
+        auth = await _resolve_auth_context(db, user, x_empresa_id)
+        if auth.role not in (FuncionarioRole.GESTOR, FuncionarioRole.OPERADOR):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions for this action",
+            )
+        return CaptureContext(empresa_id=auth.empresa_id, device_id=None)
 
 
 async def get_db_session(db: AsyncSession = Depends(get_db)) -> AsyncSession:
