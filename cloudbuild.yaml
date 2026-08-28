@@ -4,8 +4,10 @@ substitutions:
   _DEPLOY_REGION: us-central1
   _AR_REPO: passanota-images
   _SERVICE_NAME: passanota-api
+  _WORKER_SERVICE_NAME: passanota-worker
   _RUNTIME_SA: passanota-sa
   _IMAGE: ${_AR_HOSTNAME}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}
+  _WORKER_IMAGE: ${_AR_HOSTNAME}/${PROJECT_ID}/${_AR_REPO}/${_WORKER_SERVICE_NAME}
   _CONCURRENCY: "20"
   _LABEL_APP: passanota
   _LABEL_ENV: production
@@ -26,12 +28,12 @@ substitutions:
   _PLATFORM_ADMIN_EMAIL: "lucastere10@gmail.com"
   _PLATFORM_ADMIN_NOTIFY_EMAIL: "lucastere10@gmail.com"
 
-  # Cloud Tasks
+  # Cloud Tasks — handlers live on the worker
   _CLOUD_TASKS_ENABLED: "true"
   _GCP_LOCATION: us-central1
   _CLOUD_TASKS_INVOICE_QUEUE: invoice-processing
   _CLOUD_TASKS_EMAIL_QUEUE: email-delivery
-  _TASK_HANDLER_BASE_URL: "https://passanota-api-elokeq3cta-uc.a.run.app"
+  _TASK_HANDLER_BASE_URL: "https://passanota-worker-elokeq3cta-uc.a.run.app"
   _CLOUD_TASKS_SERVICE_ACCOUNT: "cloud-tasks-sa@caldas-projects-dev.iam.gserviceaccount.com"
   _MIN_INSTANCES: "0"
   _WEB_RUNTIME_SA: passanota-sa
@@ -45,11 +47,10 @@ steps:
       - |
         set -euo pipefail
         pip install --no-cache-dir uv
-        uv pip install --system ".[dev]"
-        ruff check app tests
-        pytest tests/ -q --ignore=tests/test_supabase_integration.py
+        uv run --frozen --extra dev --extra ml ruff check app tests
+        uv run --frozen --extra dev --extra ml pytest tests/ -q --ignore=tests/test_supabase_integration.py
 
-  - id: build
+  - id: build-api
     name: gcr.io/cloud-builders/docker
     env:
       - DOCKER_BUILDKIT=1
@@ -66,23 +67,48 @@ steps:
       - .
     waitFor: [qa]
 
-  - id: push
+  - id: build-worker
+    name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --cache-from
+      - ${_WORKER_IMAGE}:latest
+      - -t
+      - ${_WORKER_IMAGE}:${COMMIT_SHA}
+      - -t
+      - ${_WORKER_IMAGE}:latest
+      - -f
+      - Dockerfile.worker
+      - .
+    waitFor: [qa]
+
+  - id: push-api
     name: gcr.io/cloud-builders/docker
     args:
       - push
       - --all-tags
       - ${_IMAGE}
-    waitFor: [build]
+    waitFor: [build-api]
 
-  - id: deploy
+  - id: push-worker
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_WORKER_IMAGE}
+    waitFor: [build-worker]
+
+  - id: deploy-worker
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
     args:
       - run
       - deploy
-      - ${_SERVICE_NAME}
+      - ${_WORKER_SERVICE_NAME}
       - --image
-      - ${_IMAGE}:${COMMIT_SHA}
+      - ${_WORKER_IMAGE}:${COMMIT_SHA}
       - --region
       - ${_DEPLOY_REGION}
       - --platform
@@ -102,7 +128,7 @@ steps:
       - --revision-suffix
       - ${SHORT_SHA}
       - --labels
-      - app=${_LABEL_APP},env=${_LABEL_ENV},owner=${_LABEL_OWNER}
+      - app=${_LABEL_APP},env=${_LABEL_ENV},owner=${_LABEL_OWNER},role=worker
       - --execution-environment
       - gen2
       - --service-account
@@ -114,10 +140,55 @@ steps:
       - --startup-probe
       - httpGet.path=/health/live,httpGet.port=8080,initialDelaySeconds=5,timeoutSeconds=5,periodSeconds=5,failureThreshold=24
       - --set-env-vars
-      - ^|^SUPABASE_URL=${_SUPABASE_URL}|FRONTEND_URL=${_FRONTEND_URL}|LLM_PROVIDER=${_LLM_PROVIDER}|LLM_MODEL=${_LLM_MODEL}|EMBEDDINGS_ENABLED=true|SUPABASE_STORAGE_BUCKET=invoice-photos|DEBUG=false|EMAIL_FROM=${_EMAIL_FROM}|PLATFORM_ADMIN_EMAIL=${_PLATFORM_ADMIN_EMAIL}|PLATFORM_ADMIN_NOTIFY_EMAIL=${_PLATFORM_ADMIN_NOTIFY_EMAIL}|PYTHONUNBUFFERED=1|CLOUD_TASKS_ENABLED=${_CLOUD_TASKS_ENABLED}|GCP_PROJECT=$PROJECT_ID|GCP_LOCATION=${_GCP_LOCATION}|CLOUD_TASKS_INVOICE_QUEUE=${_CLOUD_TASKS_INVOICE_QUEUE}|CLOUD_TASKS_EMAIL_QUEUE=${_CLOUD_TASKS_EMAIL_QUEUE}|TASK_HANDLER_BASE_URL=${_TASK_HANDLER_BASE_URL}|CLOUD_TASKS_SERVICE_ACCOUNT=${_CLOUD_TASKS_SERVICE_ACCOUNT}
+      - ^|^SUPABASE_URL=${_SUPABASE_URL}|FRONTEND_URL=${_FRONTEND_URL}|LLM_PROVIDER=${_LLM_PROVIDER}|LLM_MODEL=${_LLM_MODEL}|APP_ROLE=worker|EMBEDDINGS_ENABLED=true|SUPABASE_STORAGE_BUCKET=invoice-photos|DEBUG=false|EMAIL_FROM=${_EMAIL_FROM}|PLATFORM_ADMIN_EMAIL=${_PLATFORM_ADMIN_EMAIL}|PLATFORM_ADMIN_NOTIFY_EMAIL=${_PLATFORM_ADMIN_NOTIFY_EMAIL}|PYTHONUNBUFFERED=1|CLOUD_TASKS_ENABLED=${_CLOUD_TASKS_ENABLED}|GCP_PROJECT=$PROJECT_ID|GCP_LOCATION=${_GCP_LOCATION}|CLOUD_TASKS_INVOICE_QUEUE=${_CLOUD_TASKS_INVOICE_QUEUE}|CLOUD_TASKS_EMAIL_QUEUE=${_CLOUD_TASKS_EMAIL_QUEUE}|TASK_HANDLER_BASE_URL=${_TASK_HANDLER_BASE_URL}|CLOUD_TASKS_SERVICE_ACCOUNT=${_CLOUD_TASKS_SERVICE_ACCOUNT}
       - --set-secrets
       - DATABASE_URL=${_SECRET_DATABASE_URL}:latest,SUPABASE_SECRET_KEY=${_SECRET_SUPABASE_KEY}:latest,LLM_PROVIDER_API_KEY=${_SECRET_LLM_API_KEY}:latest,RESEND_API_KEY=${_SECRET_RESEND_API_KEY}:latest
-    waitFor: [push]
+    waitFor: [push-worker]
+
+  - id: deploy-api
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image
+      - ${_IMAGE}:${COMMIT_SHA}
+      - --region
+      - ${_DEPLOY_REGION}
+      - --platform
+      - managed
+      - --no-allow-unauthenticated
+      - --port
+      - "8080"
+      - --memory
+      - 1Gi
+      - --cpu
+      - "1"
+      - --timeout
+      - "300"
+      - --cpu-boost
+      - --concurrency
+      - ${_CONCURRENCY}
+      - --revision-suffix
+      - ${SHORT_SHA}
+      - --labels
+      - app=${_LABEL_APP},env=${_LABEL_ENV},owner=${_LABEL_OWNER},role=http
+      - --execution-environment
+      - gen2
+      - --service-account
+      - ${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com
+      - --min-instances
+      - ${_MIN_INSTANCES}
+      - --max-instances
+      - "10"
+      - --startup-probe
+      - httpGet.path=/health/live,httpGet.port=8080,initialDelaySeconds=5,timeoutSeconds=5,periodSeconds=5,failureThreshold=24
+      - --set-env-vars
+      - ^|^SUPABASE_URL=${_SUPABASE_URL}|FRONTEND_URL=${_FRONTEND_URL}|LLM_PROVIDER=${_LLM_PROVIDER}|LLM_MODEL=${_LLM_MODEL}|APP_ROLE=http|EMBEDDINGS_ENABLED=false|SUPABASE_STORAGE_BUCKET=invoice-photos|DEBUG=false|EMAIL_FROM=${_EMAIL_FROM}|PLATFORM_ADMIN_EMAIL=${_PLATFORM_ADMIN_EMAIL}|PLATFORM_ADMIN_NOTIFY_EMAIL=${_PLATFORM_ADMIN_NOTIFY_EMAIL}|PYTHONUNBUFFERED=1|CLOUD_TASKS_ENABLED=${_CLOUD_TASKS_ENABLED}|GCP_PROJECT=$PROJECT_ID|GCP_LOCATION=${_GCP_LOCATION}|CLOUD_TASKS_INVOICE_QUEUE=${_CLOUD_TASKS_INVOICE_QUEUE}|CLOUD_TASKS_EMAIL_QUEUE=${_CLOUD_TASKS_EMAIL_QUEUE}|TASK_HANDLER_BASE_URL=${_TASK_HANDLER_BASE_URL}|CLOUD_TASKS_SERVICE_ACCOUNT=${_CLOUD_TASKS_SERVICE_ACCOUNT}
+      - --set-secrets
+      - DATABASE_URL=${_SECRET_DATABASE_URL}:latest,SUPABASE_SECRET_KEY=${_SECRET_SUPABASE_KEY}:latest,LLM_PROVIDER_API_KEY=${_SECRET_LLM_API_KEY}:latest,RESEND_API_KEY=${_SECRET_RESEND_API_KEY}:latest
+    waitFor: [push-api, deploy-worker]
 
   - id: grant-invokers
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
@@ -127,20 +198,25 @@ steps:
       - |
         set -euo pipefail
         grant() {
-          gcloud run services add-iam-policy-binding ${_SERVICE_NAME} \
+          local service="$$1"
+          local member="$$2"
+          gcloud run services add-iam-policy-binding "$$service" \
             --region=${_DEPLOY_REGION} \
             --project="$PROJECT_ID" \
-            --member="$$1" \
+            --member="$$member" \
             --role="roles/run.invoker" \
             --quiet
         }
-        grant "serviceAccount:${_WEB_RUNTIME_SA}@$PROJECT_ID.iam.gserviceaccount.com"
-        grant "serviceAccount:${_CLOUD_TASKS_SERVICE_ACCOUNT}"
-    waitFor: [deploy]
+        grant ${_SERVICE_NAME} "serviceAccount:${_WEB_RUNTIME_SA}@$PROJECT_ID.iam.gserviceaccount.com"
+        grant ${_WORKER_SERVICE_NAME} "serviceAccount:${_RUNTIME_SA}@$PROJECT_ID.iam.gserviceaccount.com"
+        grant ${_WORKER_SERVICE_NAME} "serviceAccount:${_CLOUD_TASKS_SERVICE_ACCOUNT}"
+    waitFor: [deploy-api, deploy-worker]
 
 images:
   - ${_IMAGE}:${COMMIT_SHA}
   - ${_IMAGE}:latest
+  - ${_WORKER_IMAGE}:${COMMIT_SHA}
+  - ${_WORKER_IMAGE}:latest
 
 options:
   logging: CLOUD_LOGGING_ONLY

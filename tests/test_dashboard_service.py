@@ -6,7 +6,17 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.dashboard_service import DashboardService
+from app.services.dashboard_service import DashboardService, resolve_dashboard_granularity
+
+
+def test_resolve_dashboard_granularity_defaults():
+    assert resolve_dashboard_granularity("7d") == "day"
+    assert resolve_dashboard_granularity("7d", "week") == "day"
+    assert resolve_dashboard_granularity("30d") == "week"
+    assert resolve_dashboard_granularity("90d") == "week"
+    assert resolve_dashboard_granularity("30d", "day") == "day"
+    assert resolve_dashboard_granularity("90d", "week") == "week"
+    assert resolve_dashboard_granularity("year") == "week"
 
 
 def _make_row(**kwargs):

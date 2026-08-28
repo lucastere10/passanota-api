@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.config import get_settings
 from app.models import Category, Emitter, Invoice, InvoiceItem, InvoiceSource, InvoiceStatus
 from app.schemas.extraction import ExtractedInvoice
-from app.schemas.invoice import str_to_decimal
+from app.schemas.invoice import InvoiceStatusItem, str_to_decimal
 from app.services.image.storage import StorageError, invoice_photo_storage
 from app.services.task_dispatcher import dispatch_invoice_processing
 
@@ -106,6 +106,23 @@ class InvoiceService:
             .limit(page_size)
         )
         return list(result.scalars().all()), total
+
+    async def list_statuses(
+        self,
+        db: AsyncSession,
+        invoice_ids: list[uuid.UUID],
+        empresa_id: uuid.UUID,
+    ) -> list[InvoiceStatusItem]:
+        if not invoice_ids:
+            return []
+
+        result = await db.execute(
+            select(Invoice.id, Invoice.status).where(
+                Invoice.id.in_(invoice_ids),
+                Invoice.empresa_id == empresa_id,
+            )
+        )
+        return [InvoiceStatusItem(id=row.id, status=row.status) for row in result.all()]
 
     async def submit_capture(
         self,

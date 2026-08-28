@@ -29,6 +29,17 @@ from app.schemas.invoice import decimal_to_str, invoice_to_response
 from app.services.invoice_service import resolve_period
 from app.database import AsyncSessionLocal
 
+ALLOWED_GRANULARITIES = {"day", "week", "month"}
+
+
+def resolve_dashboard_granularity(period: str, granularity: str | None = None) -> str:
+    """Default week for 30d/90d (and year); 7d is always day."""
+    if period == "7d":
+        return "day"
+    if granularity in ALLOWED_GRANULARITIES:
+        return granularity
+    return "week"
+
 
 class DashboardService:
     async def _run_in_session(
@@ -45,7 +56,9 @@ class DashboardService:
         period: str = "30d",
         empresa_id: uuid.UUID | None = None,
         recent_limit: int = 8,
+        granularity: str | None = None,
     ) -> DashboardAllResponse:
+        resolved_granularity = resolve_dashboard_granularity(period, granularity)
         (
             summary,
             spend_over_time,
@@ -57,8 +70,18 @@ class DashboardService:
             recent_data,
         ) = await asyncio.gather(
             self._run_in_session(self.summary, period, empresa_id=empresa_id),
-            self._run_in_session(self.spend_over_time, period, empresa_id=empresa_id),
-            self._run_in_session(self.spend_over_time_by_category, period, empresa_id=empresa_id),
+            self._run_in_session(
+                self.spend_over_time,
+                period,
+                granularity=resolved_granularity,
+                empresa_id=empresa_id,
+            ),
+            self._run_in_session(
+                self.spend_over_time_by_category,
+                period,
+                granularity=resolved_granularity,
+                empresa_id=empresa_id,
+            ),
             self._run_in_session(self.top_emitters, period, empresa_id=empresa_id),
             self._run_in_session(self.top_emitters_by_category, period, empresa_id=empresa_id),
             self._run_in_session(self.spend_by_category, period, empresa_id=empresa_id),

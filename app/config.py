@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,7 +15,12 @@ def normalize_database_url(url: str) -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_name: str = "passanota-api"
     debug: bool = False
@@ -35,6 +41,10 @@ class Settings(BaseSettings):
     )
     supabase_jwt_secret: str = Field(default="", validation_alias="SUPABASE_JWT_SECRET")
     supabase_storage_bucket: str = "invoice-photos"
+    app_role: Literal["http", "worker", "all"] = Field(
+        default="all",
+        validation_alias=AliasChoices("APP_ROLE", "app_role"),
+    )
     embeddings_enabled: bool = True
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     hf_home: str = Field(default="/tmp/hf", validation_alias="HF_HOME")
@@ -66,6 +76,22 @@ class Settings(BaseSettings):
     cloud_tasks_email_queue: str = "email-delivery"
     task_handler_base_url: str = ""
     cloud_tasks_service_account: str = ""
+
+    @property
+    def is_http_process(self) -> bool:
+        return self.app_role == "http"
+
+    @property
+    def is_worker_process(self) -> bool:
+        return self.app_role in {"worker", "all"}
+
+    @property
+    def allows_inline_ml(self) -> bool:
+        return self.app_role != "http"
+
+    @property
+    def uses_remote_encode(self) -> bool:
+        return self.app_role == "http"
 
     @field_validator("database_url", mode="before")
     @classmethod
