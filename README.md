@@ -43,7 +43,7 @@ Preencha `DATABASE_URL` com a connection string do Supabase (Settings → Databa
 O Alembic aplica as migrations no Postgres do Supabase — é assim que a estrutura vai para o banco remoto:
 
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra ml
 
 # Ver estado atual
 uv run alembic current

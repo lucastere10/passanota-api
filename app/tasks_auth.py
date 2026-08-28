@@ -22,18 +22,51 @@ def task_oidc_audience(request: Request) -> str:
     return str(request.url.replace(scheme="https"))
 
 
+def _require_oidc_enabled() -> None:
+    settings = get_settings()
+    if not settings.cloud_tasks_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cloud Tasks is disabled",
+        )
+
+
+def _verify_bearer_oidc(request: Request, authorization: str | None) -> None:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+        )
+
+    token = authorization.removeprefix("Bearer ").strip()
+    audience = task_oidc_audience(request)
+
+    try:
+        id_token.verify_oauth2_token(token, google_requests.Request(), audience=audience)
+    except Exception as exc:
+        logger.warning("Internal OIDC verification failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid task token",
+        ) from exc
+
+
+async def verify_internal_oidc(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> None:
+    """OIDC for HTTP→worker calls (encode). No Cloud Tasks queue header."""
+    _require_oidc_enabled()
+    _verify_bearer_oidc(request, authorization)
+
+
 async def verify_cloud_tasks_request(
     request: Request,
     authorization: str | None = Header(default=None),
     x_cloudtasks_queuename: str | None = Header(default=None, alias="X-CloudTasks-QueueName"),
 ) -> None:
     settings = get_settings()
-
-    if not settings.cloud_tasks_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cloud Tasks is disabled",
-        )
+    _require_oidc_enabled()
 
     if not x_cloudtasks_queuename:
         raise HTTPException(
@@ -51,20 +84,4 @@ async def verify_cloud_tasks_request(
             detail="Invalid Cloud Tasks queue",
         )
 
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing bearer token",
-        )
-
-    token = authorization.removeprefix("Bearer ").strip()
-    audience = task_oidc_audience(request)
-
-    try:
-        id_token.verify_oauth2_token(token, google_requests.Request(), audience=audience)
-    except Exception as exc:
-        logger.warning("Cloud Tasks OIDC verification failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid task token",
-        ) from exc
+    _verify_bearer_oidc(request, authorization)

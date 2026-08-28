@@ -18,7 +18,11 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv export --frozen --no-emit-project --no-dev --no-annotate \
+    uv pip install --system --no-cache --prefix=/install \
+      torch --index-url https://download.pytorch.org/whl/cpu
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --frozen --no-emit-project --no-dev --extra ml --no-emit-package torch --no-annotate \
       -o /tmp/requirements.txt \
     && uv pip install --system --no-cache --prefix=/install -r /tmp/requirements.txt
 
@@ -34,6 +38,7 @@ FROM python:3.13-slim AS runner
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
+    HF_HOME=/tmp/hf \
     PATH="/install/bin:${PATH}" \
     PYTHONPATH="/install/lib/python3.13/site-packages"
 
@@ -45,7 +50,8 @@ COPY alembic ./alembic
 COPY alembic.ini ./
 
 RUN useradd --create-home --uid 1001 appuser \
-    && chown -R appuser:appuser /app
+    && mkdir -p /tmp/hf \
+    && chown -R appuser:appuser /app /tmp/hf
 
 USER appuser
 

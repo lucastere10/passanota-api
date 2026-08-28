@@ -89,6 +89,15 @@ class PaginatedInvoicesResponse(BaseModel):
     page_size: int
 
 
+class InvoiceStatusItem(BaseModel):
+    id: UUID
+    status: InvoiceStatus
+
+
+class InvoiceStatusesResponse(BaseModel):
+    data: list[InvoiceStatusItem]
+
+
 class UpdateInvoiceRequest(BaseModel):
     issued_at: datetime | None = None
     total_amount: str | None = None
