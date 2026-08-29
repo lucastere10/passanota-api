@@ -213,7 +213,7 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     keywords: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
-    embedding = mapped_column(Vector(384), nullable=True)
+    embedding = mapped_column(Vector(512), nullable=True)
 
     items: Mapped[list["InvoiceItem"]] = relationship(back_populates="category")
 
@@ -313,7 +313,7 @@ class InvoiceItem(Base):
     unit: Mapped[str | None] = mapped_column(String(10))
     unit_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 4))
     total_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
-    embedding = mapped_column(Vector(384), nullable=True)
+    embedding = mapped_column(Vector(512), nullable=True)
 
     invoice: Mapped["Invoice"] = relationship(back_populates="items")
     category: Mapped["Category | None"] = relationship(back_populates="items")

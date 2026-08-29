@@ -1,4 +1,5 @@
 -- Funções SQL para normalização e categorização pós-extração IA.
+-- embeddings de itens/categorias usam OpenAI text-embedding-3-small (vector 512).
 -- Para uso manual no SQL Editor do Supabase (aceita múltiplos comandos).
 -- Via Alembic, cada função é executada em um statement separado (asyncpg).
 

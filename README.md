@@ -14,6 +14,7 @@ API de controle de custos via leitura de notas fiscais com IA, PostgreSQL (Supab
 |----------|-----|
 | `LLM_PROVIDER` | Provedor de visão: `openai`, `gemini` ou `anthropic` |
 | `LLM_PROVIDER_API_KEY` | Chave do provedor de IA (OpenAI, Google, Anthropic) |
+| `EMBEDDING_MODEL` | Embeddings OpenAI (`text-embedding-3-small`) |
 | `DATABASE_URL` | Connection string do Supabase Postgres |
 | `SUPABASE_URL` / `SUPABASE_SECRET_KEY` | Storage e validação de tokens |
 
@@ -43,7 +44,7 @@ Preencha `DATABASE_URL` com a connection string do Supabase (Settings → Databa
 O Alembic aplica as migrations no Postgres do Supabase — é assim que a estrutura vai para o banco remoto:
 
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra cv
 
 # Ver estado atual
 uv run alembic current
@@ -60,13 +61,16 @@ Isso executa, em ordem:
 | `002` | Remove api_keys legado |
 | `003` | Empresas, funcionários, multi-tenancy |
 | `004` | Campos foto/IA, keywords, funções SQL |
+| `011` | Embeddings OpenAI `vector(512)` |
+
+Depois do `upgrade head` em produção, rode `uv run python scripts/reembed.py` para preencher categorias e itens sem vetor. Notas presas em `pending`: `uv run python scripts/requeue_pending.py` (ou `--inline` em local).
 
 **Banco novo no Supabase:** rode `upgrade head` uma vez após os scripts SQL de extensão.
 
 **Verificar:**
 
 ```bash
-uv run alembic current   # deve mostrar 004 (head)
+uv run alembic current   # deve mostrar 011 (head)
 ```
 
 ### 4. Subir a API

@@ -1,8 +1,12 @@
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
+from app.models import Invoice, InvoiceItem, InvoiceSource, InvoiceStatus
 from app.schemas.extraction import ExtractedInvoice, ExtractedItem
+from app.services.encode_client import EncodeClientError
 from app.services.invoice_service import InvoiceService
 
 
@@ -101,3 +105,44 @@ def test_compute_adjusted_confidence_high_when_consistent():
         unmapped_count=0,
     )
     assert adjusted == 0.92
+
+
+@pytest.mark.asyncio
+async def test_populate_from_extraction_saves_items_when_embed_fails():
+    service = InvoiceService()
+    db = AsyncMock()
+    invoice = Invoice(
+        id=uuid4(),
+        source_type=InvoiceSource.PHOTO_AI,
+        status=InvoiceStatus.PENDING,
+    )
+    extracted = ExtractedInvoice(
+        itens=[
+            ExtractedItem(
+                descricao="Arroz",
+                valor=Decimal("10.00"),
+                categoria="alimentacao",
+            )
+        ],
+    )
+    category_id = uuid4()
+
+    with (
+        patch.object(
+            service,
+            "_load_category_slug_map",
+            AsyncMock(return_value={"alimentacao": category_id}),
+        ),
+        patch(
+            "app.services.invoice_service.encode_texts",
+            AsyncMock(side_effect=EncodeClientError("down")),
+        ),
+    ):
+        await service.populate_from_extraction(db, invoice, extracted)
+
+    added = db.add.call_args[0][0]
+    assert isinstance(added, InvoiceItem)
+    assert added.description == "Arroz"
+    assert added.embedding is None
+    assert added.category_id == category_id
+

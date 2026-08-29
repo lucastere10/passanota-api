@@ -25,8 +25,11 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def dashboard_all(
     auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
     period: str = Query(default="30d"),
+    granularity: str | None = Query(default=None),
 ) -> DashboardAllResponse:
-    return await dashboard_service.get_all(period, empresa_id=auth.empresa_id)
+    return await dashboard_service.get_all(
+        period, empresa_id=auth.empresa_id, granularity=granularity
+    )
 
 
 @router.get("/summary", response_model=DashboardSummaryResponse)

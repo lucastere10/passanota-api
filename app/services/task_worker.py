@@ -116,10 +116,16 @@ class TaskWorker:
         invoice_id: uuid.UUID,
         message: str,
     ) -> None:
-        invoice.status = InvoiceStatus.FAILED
-        invoice.error_message = message
+        await db.rollback()
+        failed = await db.get(Invoice, invoice_id)
+        if failed is None:
+            logger.error("Invoice %s not found after failure", invoice_id)
+            return
+        failed.status = InvoiceStatus.FAILED
+        failed.error_message = message[:2000]
         await db.commit()
         logger.error("Invoice %s: processing failed — %s", invoice_id, message)
+
 
     async def send_email(self, db: AsyncSession, task: SendEmailTask) -> None:
         if task.type == "magic_link":

@@ -13,6 +13,7 @@ from app.schemas.invoice import (
     ExtractionSummary,
     InvoiceItemResponse,
     InvoiceResponse,
+    InvoiceStatusesResponse,
     PaginatedInvoicesResponse,
     UpdateInvoiceItemRequest,
     UpdateInvoiceRequest,
@@ -108,6 +109,38 @@ async def list_invoices(
         page=page,
         page_size=page_size,
     )
+
+
+MAX_STATUS_IDS = 20
+
+
+def _parse_status_ids(ids: str) -> list[UUID]:
+    parts = [part.strip() for part in ids.split(",") if part.strip()]
+    if not parts:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ids is required")
+    if len(parts) > MAX_STATUS_IDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"ids accepts at most {MAX_STATUS_IDS} values",
+        )
+    try:
+        return [UUID(part) for part in parts]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="ids must be UUIDs",
+        ) from exc
+
+
+@router.get("/statuses", response_model=InvoiceStatusesResponse)
+async def list_invoice_statuses(
+    auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
+    ids: Annotated[str, Query(min_length=1)],
+    db: AsyncSession = Depends(get_db_session),
+) -> InvoiceStatusesResponse:
+    invoice_ids = _parse_status_ids(ids)
+    data = await invoice_service.list_statuses(db, invoice_ids, empresa_id=auth.empresa_id)
+    return InvoiceStatusesResponse(data=data)
 
 
 @router.get("/{invoice_id}", response_model=InvoiceResponse)

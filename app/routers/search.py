@@ -8,7 +8,7 @@ from app.dependencies import get_db_session, require_gestor_or_operador
 from app.schemas.auth import AuthContext
 from app.schemas.invoice import decimal_to_str
 from app.schemas.search import SemanticSearchRequest, SemanticSearchResponse, SemanticSearchResult
-from app.services.embedding_service import embedding_service
+from app.services.encode_client import encode_one
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -19,7 +19,7 @@ async def semantic_search(
     auth: Annotated[AuthContext, Depends(require_gestor_or_operador)],
     db: AsyncSession = Depends(get_db_session),
 ) -> SemanticSearchResponse:
-    query_vector = embedding_service.encode_one(payload.query)
+    query_vector = await encode_one(payload.query)
     if not query_vector:
         return SemanticSearchResponse(results=[])
 

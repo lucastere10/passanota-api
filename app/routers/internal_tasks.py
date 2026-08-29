@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db_session
-from app.tasks_auth import verify_cloud_tasks_request
 from app.schemas.tasks import ProcessInvoiceTask, SendEmailTask
 from app.services.task_worker import task_worker
+from app.tasks_auth import verify_cloud_tasks_request
 
 logger = logging.getLogger(__name__)
 
