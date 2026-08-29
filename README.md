@@ -63,7 +63,7 @@ Isso executa, em ordem:
 | `004` | Campos foto/IA, keywords, funções SQL |
 | `011` | Embeddings OpenAI `vector(512)` |
 
-Depois do `upgrade head` em produção, rode `uv run python scripts/reembed.py` para preencher categorias e itens sem vetor.
+Depois do `upgrade head` em produção, rode `uv run python scripts/reembed.py` para preencher categorias e itens sem vetor. Notas presas em `pending`: `uv run python scripts/requeue_pending.py` (ou `--inline` em local).
 
 **Banco novo no Supabase:** rode `upgrade head` uma vez após os scripts SQL de extensão.
 
