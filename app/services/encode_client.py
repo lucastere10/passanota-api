@@ -1,25 +1,19 @@
-import asyncio
 import logging
 
 import httpx
 from fastapi import HTTPException, status
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
+OPENAI_EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings"
 ENCODE_TIMEOUT_SECONDS = 30.0
+EMBED_BATCH_SIZE = 100
 
 
 class EncodeClientError(Exception):
     pass
-
-
-def _fetch_id_token(audience: str) -> str:
-    from google.auth.transport.requests import Request
-    from google.oauth2 import id_token
-
-    return id_token.fetch_id_token(Request(), audience)
 
 
 async def encode_texts(texts: list[str]) -> list[list[float]]:
@@ -27,37 +21,54 @@ async def encode_texts(texts: list[str]) -> list[list[float]]:
         return []
 
     settings = get_settings()
-    if not settings.uses_remote_encode:
-        from app.services.embedding_service import embedding_service
+    if not settings.embeddings_enabled:
+        return []
+    if not settings.llm_provider_api_key:
+        raise EncodeClientError("LLM_PROVIDER_API_KEY is not configured")
 
-        return await asyncio.to_thread(embedding_service.encode, texts)
+    vectors: list[list[float]] = []
+    async with httpx.AsyncClient(timeout=ENCODE_TIMEOUT_SECONDS) as client:
+        for start in range(0, len(texts), EMBED_BATCH_SIZE):
+            batch = texts[start : start + EMBED_BATCH_SIZE]
+            vectors.extend(await _embed_batch(client, settings, batch))
+    return vectors
 
-    base = settings.task_handler_base_url.rstrip("/")
-    if not base:
-        raise EncodeClientError("TASK_HANDLER_BASE_URL is not configured")
 
-    url = f"{base}/internal/encode"
-    token = await asyncio.to_thread(_fetch_id_token, url)
-
+async def _embed_batch(
+    client: httpx.AsyncClient,
+    settings: Settings,
+    batch: list[str],
+) -> list[list[float]]:
     try:
-        async with httpx.AsyncClient(timeout=ENCODE_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                url,
-                json={"texts": texts},
-                headers={"Authorization": f"Bearer {token}"},
-            )
+        response = await client.post(
+            OPENAI_EMBEDDINGS_URL,
+            headers={"Authorization": f"Bearer {settings.llm_provider_api_key}"},
+            json={
+                "model": settings.embedding_model,
+                "input": batch,
+                "dimensions": settings.embedding_dimensions,
+                "encoding_format": "float",
+            },
+        )
     except httpx.HTTPError as exc:
-        logger.exception("Worker encode request failed")
-        raise EncodeClientError("Worker encode request failed") from exc
+        logger.exception("OpenAI embeddings request failed")
+        raise EncodeClientError("OpenAI embeddings request failed") from exc
 
     if response.status_code >= 400:
-        logger.error("Worker encode returned %s: %s", response.status_code, response.text)
-        raise EncodeClientError(f"Worker encode returned {response.status_code}")
+        logger.error("OpenAI embeddings returned %s: %s", response.status_code, response.text)
+        raise EncodeClientError(f"OpenAI embeddings returned {response.status_code}")
 
-    data = response.json()
-    vectors = data.get("vectors")
-    if not isinstance(vectors, list):
-        raise EncodeClientError("Worker encode payload missing vectors")
+    data = response.json().get("data")
+    if not isinstance(data, list) or len(data) != len(batch):
+        raise EncodeClientError("OpenAI embeddings payload missing vectors")
+
+    ordered = sorted(data, key=lambda item: item.get("index", 0))
+    vectors: list[list[float]] = []
+    for item in ordered:
+        embedding = item.get("embedding")
+        if not isinstance(embedding, list):
+            raise EncodeClientError("OpenAI embeddings payload missing vectors")
+        vectors.append(embedding)
     return vectors
 
 

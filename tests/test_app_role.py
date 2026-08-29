@@ -34,7 +34,7 @@ def test_http_role_process_does_not_import_ml():
             "import sys\n"
             "loaded = [m for m in ("
             "'cv2', 'torch', 'sentence_transformers', "
-            "'app.services.task_worker', 'app.services.embedding_service', "
+            "'app.services.task_worker', "
             "'app.services.image.preprocessor'"
             ") if m in sys.modules]\n"
             "assert not loaded, loaded\n"
@@ -54,16 +54,18 @@ def test_worker_role_mounts_internal_not_dashboard():
     mount_routers(app, "worker")
     paths = _paths(app)
     assert any(path.startswith("/internal/tasks") for path in paths)
-    assert "/internal/encode" in paths
+    assert "/internal/encode" not in paths
     assert not any(path.startswith("/v1/dashboard") for path in paths)
 
 
-def test_search_module_does_not_import_embedding_service():
+def test_search_module_does_not_import_local_ml():
     import sys
 
-    sys.modules.pop("app.services.embedding_service", None)
     sys.modules.pop("app.routers.search", None)
-    sys.modules.pop("app.services.encode_client", None)
+    before = set(sys.modules)
     import app.routers.search  # noqa: F401
 
-    assert "app.services.embedding_service" not in sys.modules
+    loaded = set(sys.modules) - before
+    assert "cv2" not in loaded
+    assert "app.services.image.preprocessor" not in loaded
+    assert "app.services.task_worker" not in loaded

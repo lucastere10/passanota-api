@@ -23,7 +23,7 @@ substitutions:
   _SUPABASE_URL: https://kdmiptpxatsobroqzjnq.supabase.co
   _FRONTEND_URL: "https://passanota.caldasdev.com.br"
   _LLM_PROVIDER: openai
-  _LLM_MODEL: gpt-5.4
+  _LLM_MODEL: gpt-4o
   _EMAIL_FROM: "Lucas Caldas <noreply@caldasdev.com.br>"
   _PLATFORM_ADMIN_EMAIL: "lucastere10@gmail.com"
   _PLATFORM_ADMIN_NOTIFY_EMAIL: "lucastere10@gmail.com"
@@ -47,8 +47,8 @@ steps:
       - |
         set -euo pipefail
         pip install --no-cache-dir uv
-        uv run --frozen --extra dev --extra ml ruff check app tests
-        uv run --frozen --extra dev --extra ml pytest tests/ -q --ignore=tests/test_supabase_integration.py
+        uv run --frozen --extra dev --extra cv ruff check app tests
+        uv run --frozen --extra dev --extra cv pytest tests/ -q --ignore=tests/test_supabase_integration.py
 
   - id: build-api
     name: gcr.io/cloud-builders/docker
@@ -117,14 +117,14 @@ steps:
       - --port
       - "8080"
       - --memory
-      - 2Gi
+      - 1Gi
       - --cpu
-      - "2"
+      - "1"
       - --timeout
-      - "300"
+      - "60"
       - --cpu-boost
       - --concurrency
-      - ${_CONCURRENCY}
+      - "4"
       - --revision-suffix
       - ${SHORT_SHA}
       - --labels
@@ -185,7 +185,7 @@ steps:
       - --startup-probe
       - httpGet.path=/health/live,httpGet.port=8080,initialDelaySeconds=5,timeoutSeconds=5,periodSeconds=5,failureThreshold=24
       - --set-env-vars
-      - ^|^SUPABASE_URL=${_SUPABASE_URL}|FRONTEND_URL=${_FRONTEND_URL}|LLM_PROVIDER=${_LLM_PROVIDER}|LLM_MODEL=${_LLM_MODEL}|APP_ROLE=http|EMBEDDINGS_ENABLED=false|SUPABASE_STORAGE_BUCKET=invoice-photos|DEBUG=false|EMAIL_FROM=${_EMAIL_FROM}|PLATFORM_ADMIN_EMAIL=${_PLATFORM_ADMIN_EMAIL}|PLATFORM_ADMIN_NOTIFY_EMAIL=${_PLATFORM_ADMIN_NOTIFY_EMAIL}|PYTHONUNBUFFERED=1|CLOUD_TASKS_ENABLED=${_CLOUD_TASKS_ENABLED}|GCP_PROJECT=$PROJECT_ID|GCP_LOCATION=${_GCP_LOCATION}|CLOUD_TASKS_INVOICE_QUEUE=${_CLOUD_TASKS_INVOICE_QUEUE}|CLOUD_TASKS_EMAIL_QUEUE=${_CLOUD_TASKS_EMAIL_QUEUE}|TASK_HANDLER_BASE_URL=${_TASK_HANDLER_BASE_URL}|CLOUD_TASKS_SERVICE_ACCOUNT=${_CLOUD_TASKS_SERVICE_ACCOUNT}
+      - ^|^SUPABASE_URL=${_SUPABASE_URL}|FRONTEND_URL=${_FRONTEND_URL}|LLM_PROVIDER=${_LLM_PROVIDER}|LLM_MODEL=${_LLM_MODEL}|APP_ROLE=http|EMBEDDINGS_ENABLED=true|SUPABASE_STORAGE_BUCKET=invoice-photos|DEBUG=false|EMAIL_FROM=${_EMAIL_FROM}|PLATFORM_ADMIN_EMAIL=${_PLATFORM_ADMIN_EMAIL}|PLATFORM_ADMIN_NOTIFY_EMAIL=${_PLATFORM_ADMIN_NOTIFY_EMAIL}|PYTHONUNBUFFERED=1|CLOUD_TASKS_ENABLED=${_CLOUD_TASKS_ENABLED}|GCP_PROJECT=$PROJECT_ID|GCP_LOCATION=${_GCP_LOCATION}|CLOUD_TASKS_INVOICE_QUEUE=${_CLOUD_TASKS_INVOICE_QUEUE}|CLOUD_TASKS_EMAIL_QUEUE=${_CLOUD_TASKS_EMAIL_QUEUE}|TASK_HANDLER_BASE_URL=${_TASK_HANDLER_BASE_URL}|CLOUD_TASKS_SERVICE_ACCOUNT=${_CLOUD_TASKS_SERVICE_ACCOUNT}
       - --set-secrets
       - DATABASE_URL=${_SECRET_DATABASE_URL}:latest,SUPABASE_SECRET_KEY=${_SECRET_SUPABASE_KEY}:latest,LLM_PROVIDER_API_KEY=${_SECRET_LLM_API_KEY}:latest,RESEND_API_KEY=${_SECRET_RESEND_API_KEY}:latest
     waitFor: [push-api, deploy-worker]
