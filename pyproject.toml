@@ -1,6 +1,6 @@
 [project]
 name = "passanota-api"
-version = "0.1.0"
+version = "1.0.2"
 description = "API de controle de custos via leitura de notas fiscais com IA"
 readme = "README.md"
 requires-python = ">=3.13"
